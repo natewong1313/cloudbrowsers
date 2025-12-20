@@ -1,0 +1,16 @@
+{
+  "name": "browser-container",
+  "type": "module",
+  "scripts": {
+    "dev:test": "bun run ./test/index.ts"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.34.0"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "tsdown": "^0.16.5",
+    "@browser-shop/config": "workspace:*",
+    "@types/node": "catalog:"
+  }
+}
