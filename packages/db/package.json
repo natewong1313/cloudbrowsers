@@ -1,0 +1,28 @@
+{
+  "name": "@browser-shop/db",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "db:push": "drizzle-kit push",
+    "db:generate": "drizzle-kit generate"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.8",
+    "typescript": "catalog:",
+    "@browser-shop/config": "workspace:*"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.1",
+    "@libsql/client": "0.15.15",
+    "libsql": "0.5.22",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  }
+}
