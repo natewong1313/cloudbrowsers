@@ -1,33 +1,17 @@
-use axum::{
-    Router,
-    body::Bytes,
-    extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
-    response::IntoResponse,
-    routing::any,
-};
-use axum_extra::TypedHeader;
-
-use std::ops::ControlFlow;
-use std::{net::SocketAddr, path::PathBuf};
-use tower_http::{
-    services::ServeDir,
-    trace::{DefaultMakeSpan, TraceLayer},
-};
-
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-//allows to extract the IP of connecting user
-use axum::extract::connect_info::ConnectInfo;
-use axum::extract::ws::CloseFrame;
-
-//allows to split the websocket stream into separate TX and RX branches
+use anyhow::Context;
+use axum::extract::WebSocketUpgrade;
+use axum::extract::ws::WebSocket;
+use axum::{Router, response::IntoResponse, routing::any};
+use chromiumoxide::Browser;
 use futures_util::{sink::SinkExt, stream::StreamExt};
+use std::net::SocketAddr;
+use tokio_tungstenite::connect_async;
+use tungstenite::client::IntoClientRequest;
+
+use crate::launcher;
 
 pub async fn serve() -> anyhow::Result<(), anyhow::Error> {
-    let app = Router::new().route("/connect", any(ws_handler)).layer(
-        TraceLayer::new_for_http().make_span_with(DefaultMakeSpan::default().include_headers(true)),
-    );
-
+    let app = Router::new().route("/connect", any(ws_handler));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:6700")
         .await
         .unwrap();
@@ -41,135 +25,119 @@ pub async fn serve() -> anyhow::Result<(), anyhow::Error> {
     Ok(())
 }
 
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    user_agent: Option<TypedHeader<headers::UserAgent>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-) -> impl IntoResponse {
-    let user_agent = if let Some(TypedHeader(user_agent)) = user_agent {
-        user_agent.to_string()
-    } else {
-        String::from("Unknown browser")
-    };
-    println!("`{user_agent}` at {addr} connected.");
-    // finalize the upgrade process by returning upgrade callback.
-    // we can customize the callback by sending additional info such as address.
-    ws.on_upgrade(move |socket| handle_socket_proxy(socket, addr))
+async fn ws_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
+    ws.on_upgrade(handle_socket_proxy)
 }
 
 // our server forwards messages to/from the client to/from the browser
-async fn handle_socket_proxy(mut socket: WebSocket, who: SocketAddr) {
-    // split socket so we can forward either way
-    let (mut sender, mut receiver) = socket.split();
-
-    while let Some(Ok(msg)) = receiver.next().await {
-        // print message and break if instructed to do so
-        if process_message(msg, who).is_break() {
-            break;
-        }
-    }
-}
-
-/// Actual websocket statemachine (one will be spawned per connection)
-async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
-    // By splitting socket we can send and receive at the same time. In this example we will send
-    // unsolicited messages to client based on some sort of server's internal event (i.e .timer).
-    let (mut sender, mut receiver) = socket.split();
-
-    // Spawn a task that will push several messages to the client (does not matter what client does)
-    let mut send_task = tokio::spawn(async move {
-        let n_msg = 20;
-        for i in 0..n_msg {
-            // In case of any websocket error, we exit.
-            if sender
-                .send(Message::Text(format!("Server message {i} ...").into()))
-                .await
-                .is_err()
-            {
-                return i;
-            }
-
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        }
-
-        println!("Sending close to {who}...");
-        if let Err(e) = sender
-            .send(Message::Close(Some(CloseFrame {
-                code: axum::extract::ws::close_code::NORMAL,
-                reason: Utf8Bytes::from_static("Goodbye"),
-            })))
-            .await
-        {
-            println!("Could not send Close due to {e}, probably it is ok?");
-        }
-        n_msg
-    });
-
-    // This second task will receive messages from client and print them on server console
-    let mut recv_task = tokio::spawn(async move {
-        let mut cnt = 0;
-        while let Some(Ok(msg)) = receiver.next().await {
-            cnt += 1;
-            // print message and break if instructed to do so
-            if process_message(msg, who).is_break() {
+async fn handle_socket_proxy(client_socket: WebSocket) {
+    // TODO: dont unwrap and move to pool structure
+    let browser_info = launcher::launch_browser().await.unwrap();
+    let browser = browser_info.browser;
+    let mut browser_handler = browser_info.handler;
+    let _handle = tokio::spawn(async move {
+        while let Some(h) = browser_handler.next().await {
+            if h.is_err() {
                 break;
             }
         }
-        cnt
+    });
+
+    let browser_stream = connect_to_browser(browser).await.unwrap();
+    let (mut browser_sender, mut browser_recv) = browser_stream.split();
+
+    let (mut client_sender, mut client_recv) = client_socket.split();
+
+    // client -> browser
+    let mut client_to_browser_task = tokio::spawn(async move {
+        while let Some(Ok(msg)) = client_recv.next().await {
+            let browser_msg = axum_msg_to_tungstenite(msg);
+            if browser_sender.send(browser_msg).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // browser -> client
+    let mut browser_to_client_task = tokio::spawn(async move {
+        while let Some(Ok(msg)) = browser_recv.next().await {
+            let client_msg = tungstenite_msg_to_axum(msg);
+            if client_sender.send(client_msg).await.is_err() {
+                break;
+            }
+        }
     });
 
     // If any one of the tasks exit, abort the other.
     tokio::select! {
-        rv_a = (&mut send_task) => {
-            match rv_a {
-                Ok(a) => println!("{a} messages sent to {who}"),
-                Err(a) => println!("Error sending messages {a:?}")
+        ctb_res = (&mut client_to_browser_task) => {
+            match ctb_res {
+                Ok(_) => println!("client to browser proxy finished"),
+                Err(err) => println!("err forwarding messages {err:?}")
             }
-            recv_task.abort();
+            browser_to_client_task.abort();
         },
-        rv_b = (&mut recv_task) => {
-            match rv_b {
-                Ok(b) => println!("Received {b} messages"),
-                Err(b) => println!("Error receiving messages {b:?}")
+        btc_res = (&mut browser_to_client_task) => {
+            match btc_res {
+                Ok(_) => println!("browser to client proxy finished"),
+                Err(err) => println!("err forwarding messages {err:?}")
             }
-            send_task.abort();
+            client_to_browser_task.abort();
         }
     }
-
-    // returning from the handler closes the websocket connection
-    println!("Websocket context {who} destroyed");
 }
 
-/// helper to print contents of messages to stdout. Has special treatment for Close.
-fn process_message(msg: Message, who: SocketAddr) -> ControlFlow<(), ()> {
-    match msg {
-        Message::Text(t) => {
-            println!(">>> {who} sent str: {t:?}");
-        }
-        Message::Binary(d) => {
-            println!(">>> {who} sent {} bytes: {d:?}", d.len());
-        }
-        Message::Close(c) => {
-            if let Some(cf) = c {
-                println!(
-                    ">>> {who} sent close with code {} and reason `{}`",
-                    cf.code, cf.reason
-                );
-            } else {
-                println!(">>> {who} somehow sent close message without CloseFrame");
-            }
-            return ControlFlow::Break(());
-        }
+// Connects to the browsers websocket port and returns the sender and reciever handles
+async fn connect_to_browser(
+    browser: Browser,
+) -> anyhow::Result<
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    anyhow::Error,
+> {
+    let addr = browser.websocket_address();
+    let request = addr.into_client_request().context("into client req")?;
 
-        Message::Pong(v) => {
-            println!(">>> {who} sent pong with {v:?}");
+    let (ws_stream, _) = connect_async(request).await.context("connect browser ws")?;
+    tracing::debug!("connected to browser ws on {}", addr);
+
+    Ok(ws_stream)
+}
+
+fn tungstenite_msg_to_axum(msg: tungstenite::Message) -> axum::extract::ws::Message {
+    return match msg {
+        tungstenite::Message::Text(text) => {
+            axum::extract::ws::Message::Text(text.to_string().into())
         }
-        // You should never need to manually handle Message::Ping, as axum's websocket library
-        // will do so for you automagically by replying with Pong and copying the v according to
-        // spec. But if you need the contents of the pings you can see them here.
-        Message::Ping(v) => {
-            println!(">>> {who} sent ping with {v:?}");
+        tungstenite::Message::Binary(data) => axum::extract::ws::Message::Binary(data),
+        tungstenite::Message::Ping(data) => axum::extract::ws::Message::Ping(data),
+        tungstenite::Message::Pong(data) => axum::extract::ws::Message::Pong(data),
+        tungstenite::Message::Close(frame) => {
+            let close_frame = frame.map(|f| axum::extract::ws::CloseFrame {
+                code: f.code.into(),
+                reason: f.reason.to_string().into(),
+            });
+            axum::extract::ws::Message::Close(close_frame)
         }
-    }
-    ControlFlow::Continue(())
+        tungstenite::Message::Frame(_) => {
+            panic!("Fix this eventually")
+        }
+    };
+}
+
+fn axum_msg_to_tungstenite(msg: axum::extract::ws::Message) -> tungstenite::Message {
+    return match msg {
+        axum::extract::ws::Message::Text(text) => {
+            tungstenite::Message::Text(text.to_string().into())
+        }
+        axum::extract::ws::Message::Binary(data) => tungstenite::Message::Binary(data),
+        axum::extract::ws::Message::Ping(data) => tungstenite::Message::Ping(data),
+        axum::extract::ws::Message::Pong(data) => tungstenite::Message::Pong(data),
+        axum::extract::ws::Message::Close(frame) => {
+            let close_frame = frame.map(|f| tungstenite::protocol::CloseFrame {
+                code: tungstenite::protocol::frame::coding::CloseCode::from(f.code),
+                reason: f.reason.to_string().into(),
+            });
+            tungstenite::Message::Close(close_frame)
+        }
+    };
 }

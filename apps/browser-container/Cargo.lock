@@ -148,12 +148,13 @@ dependencies = [
  "chromiumoxide",
  "futures",
  "futures-util",
- "headers",
  "port_check",
  "tokio",
+ "tokio-tungstenite",
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "tungstenite",
 ]
 
 [[package]]
