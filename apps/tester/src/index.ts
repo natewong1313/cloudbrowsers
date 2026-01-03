@@ -5,7 +5,7 @@ const sleep = (ms: number) => {
 };
 
 const browser = await puppeteer.connect({
-  browserWSEndpoint: "ws://127.0.0.1:6700/connect",
+  browserWSEndpoint: "ws://127.0.0.1:3000/connect",
   // "ws://127.0.0.1:59641/devtools/browser/0fb40df1-6c14-40f5-bb45-9b0837b092d5",
 });
 // const browser = await puppeteer.launch({

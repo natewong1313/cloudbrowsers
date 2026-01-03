@@ -17,12 +17,13 @@
     "@browser-shop/db": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "catalog:",
-    "tsdown": "^0.16.5",
     "@browser-shop/config": "workspace:*",
-    "alchemy": "^0.81.2",
-    "wrangler": "^4.54.0",
+    "@cloudflare/containers": "^0.0.31",
+    "@cloudflare/workers-types": "catalog:",
     "@types/node": "catalog:",
-    "@cloudflare/workers-types": "catalog:"
+    "alchemy": "^0.81.2",
+    "tsdown": "^0.16.5",
+    "typescript": "catalog:",
+    "wrangler": "^4.54.0"
   }
 }

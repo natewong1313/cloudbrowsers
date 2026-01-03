@@ -1,0 +1,2 @@
+bun alchemy configure
+

@@ -17,6 +17,8 @@ pub struct BrowserSession {
 }
 impl BrowserSession {
     pub async fn launch() -> anyhow::Result<Self> {
+        tracing::info!("Starting browser session launch...");
+        
         let id = Uuid::new_v4();
         let tmp_dir = tempdir()?;
 
@@ -28,17 +30,32 @@ impl BrowserSession {
         tracing::debug!("Launching browser @ 127.0.0.1:{}", free_port);
         let port_arg = format!("--remote-debugging-port={}", free_port);
 
+        tracing::info!("Building browser configuration...");
         let config = match BrowserConfig::builder()
-            .new_headless_mode()
+            .with_head()
+            // .new_headless_mode()
             .user_data_dir(tmp_dir.path())
             .arg(port_arg)
+            .arg("--no-sandbox")
+            .arg("--disable-setuid-sandbox")
+            .arg("--disable-dev-shm-usage")
+            .arg("--disable-gpu")
+            .arg("--single-process")
             .build()
         {
             Ok(config) => config,
             // it returns an error as a string -_-
             Err(err) => return Err(anyhow!("Unknown config error: {}", err)),
         };
-        let (mut browser, handler) = chromiumoxide::Browser::launch(config).await?;
+        
+        tracing::info!("Launching Chrome browser...");
+        let (mut browser, handler) = match chromiumoxide::Browser::launch(config).await {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::error!("Failed to launch Chrome browser: {}", e);
+                return Err(anyhow!("Chrome launch failed: {}", e));
+            }
+        };
 
         let child_proc = match browser.get_mut_child() {
             Some(proc) => proc.as_mut_inner(),

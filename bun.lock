@@ -22,6 +22,7 @@
       },
       "devDependencies": {
         "@browser-shop/config": "workspace:*",
+        "@cloudflare/containers": "^0.0.31",
         "@types/node": "catalog:",
         "tsdown": "^0.16.5",
         "typescript": "catalog:",
@@ -37,12 +38,25 @@
       },
       "devDependencies": {
         "@browser-shop/config": "workspace:*",
+        "@cloudflare/containers": "^0.0.31",
         "@cloudflare/workers-types": "catalog:",
         "@types/node": "catalog:",
         "alchemy": "^0.81.2",
         "tsdown": "^0.16.5",
         "typescript": "catalog:",
         "wrangler": "^4.54.0",
+      },
+    },
+    "apps/tester": {
+      "name": "tester",
+      "dependencies": {
+        "puppeteer-core": "^24.34.0",
+      },
+      "devDependencies": {
+        "@browser-shop/config": "workspace:*",
+        "@types/node": "catalog:",
+        "tsdown": "^0.16.5",
+        "typescript": "catalog:",
       },
     },
     "packages/config": {
@@ -149,6 +163,8 @@
     "@browser-shop/config": ["@browser-shop/config@workspace:packages/config"],
 
     "@browser-shop/db": ["@browser-shop/db@workspace:packages/db"],
+
+    "@cloudflare/containers": ["@cloudflare/containers@0.0.31", "", {}, "sha512-zHxW6/JMzvK9To98OcNg2d3eiZUZRg11pARmQpJJyQdIQ0eQ/dh/Wpufx+HGd0k/xjMdrFP77YnOeopxdzsgng=="],
 
     "@cloudflare/kv-asset-handler": ["@cloudflare/kv-asset-handler@0.4.1", "", { "dependencies": { "mime": "^3.0.0" } }, "sha512-Nu8ahitGFFJztxUml9oD/DLb7Z28C8cd8F46IVQ7y5Btz575pvMY8AqZsXkX7Gds29eCKdMgIHjIvzskHgPSFg=="],
 
@@ -873,6 +889,8 @@
     "tar-fs": ["tar-fs@3.1.1", "", { "dependencies": { "pump": "^3.0.0", "tar-stream": "^3.1.5" }, "optionalDependencies": { "bare-fs": "^4.0.1", "bare-path": "^3.0.0" } }, "sha512-LZA0oaPOc2fVo82Txf3gw+AkEd38szODlptMYejQUhndHMLQ9M059uXR+AfS7DNo0NpINvSqDsvyaCrBVkptWg=="],
 
     "tar-stream": ["tar-stream@3.1.7", "", { "dependencies": { "b4a": "^1.6.4", "fast-fifo": "^1.2.0", "streamx": "^2.15.0" } }, "sha512-qJj60CXt7IU1Ffyc3NJMjh6EkuCFej46zUqJ4J7pqYlThyd9bO0XBTmcOIhSzZJVWfsLks0+nle/j538YAW9RQ=="],
+
+    "tester": ["tester@workspace:apps/tester"],
 
     "text-decoder": ["text-decoder@1.2.3", "", { "dependencies": { "b4a": "^1.6.4" } }, "sha512-3/o9z3X0X0fTupwsYvR03pJ/DjWuqqrfwBgTQzdWDiQSm9KitAyz/9WqsT2JQW7KV2m+bC2ol/zqpW37NHxLaA=="],
 

@@ -1,8 +1,9 @@
 {
-  "name": "browser-container",
+  "name": "tester",
   "type": "module",
+  "main": "src/index.ts",
   "scripts": {
-    "dev:test": "bun run ./test/index.ts"
+    "dev": "bun run ./src/index.ts"
   },
   "dependencies": {
     "puppeteer-core": "^24.34.0"

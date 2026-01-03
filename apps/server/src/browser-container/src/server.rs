@@ -14,10 +14,8 @@ use crate::browser_session::{self, BrowserSession};
 
 pub async fn serve() -> anyhow::Result<(), anyhow::Error> {
     let app = Router::new().route("/connect", any(ws_handler));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:6700")
-        .await
-        .unwrap();
-    tracing::debug!("listening on {}", listener.local_addr().unwrap());
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:6700").await.unwrap();
+    tracing::info!("listening on {}", listener.local_addr().unwrap());
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -29,6 +27,7 @@ pub async fn serve() -> anyhow::Result<(), anyhow::Error> {
 
 async fn ws_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
     ws.on_upgrade(async |socket| {
+        tracing::debug!("WebSocket connection established");
         if let Err(err) = handle_socket_proxy(socket).await {
             tracing::error!("exited handle_socket_proxy unexpectedly with {}", err);
         };
