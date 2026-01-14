@@ -11,7 +11,7 @@
   "devDependencies": {
     "typescript": "catalog:",
     "tsdown": "^0.16.5",
-    "@browser-shop/config": "workspace:*",
+    "@cloudbrowsers/config": "workspace:*",
     "@types/node": "catalog:"
   }
 }

@@ -12,7 +12,7 @@ import { config } from "dotenv";
 
 config({ path: "./.env" });
 
-const app = await alchemy("browser-shop");
+const app = await alchemy("cloudbrowsers");
 
 const db = await D1Database("database", {
   migrationsDir: "packages/db/src/migrations",

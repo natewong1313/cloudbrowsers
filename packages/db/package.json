@@ -1,5 +1,5 @@
 {
-  "name": "@browser-shop/db",
+  "name": "@cloudbrowsers/db",
   "type": "module",
   "exports": {
     ".": {
@@ -16,7 +16,7 @@
   "devDependencies": {
     "drizzle-kit": "^0.31.8",
     "typescript": "catalog:",
-    "@browser-shop/config": "workspace:*"
+    "@cloudbrowsers/config": "workspace:*"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.1",

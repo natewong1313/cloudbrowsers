@@ -1,5 +1,5 @@
 {
-  "name": "browser-shop",
+  "name": "cloudbrowsers",
   "private": true,
   "workspaces": {
     "packages": [
@@ -22,8 +22,8 @@
     "check-types": "turbo check-types",
     "dev:router": "turbo -F router dev",
     "dev:tester": "turbo -F tester dev",
-    "db:push": "turbo -F @browser-shop/db db:push",
-    "db:generate": "turbo -F @browser-shop/db db:generate"
+    "db:push": "turbo -F @cloudbrowsers/db db:push",
+    "db:generate": "turbo -F @cloudbrowsers/db db:generate"
   },
   "dependencies": {
     "dotenv": "catalog:",

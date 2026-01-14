@@ -1,5 +1,5 @@
 {
-  "extends": "@browser-shop/config/tsconfig.base.json",
+  "extends": "@cloudbrowsers/config/tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
     "outDir": "dist",

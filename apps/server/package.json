@@ -14,10 +14,10 @@
     "hono": "^4.8.2",
     "dotenv": "catalog:",
     "zod": "catalog:",
-    "@browser-shop/db": "workspace:*"
+    "@cloudbrowsers/db": "workspace:*"
   },
   "devDependencies": {
-    "@browser-shop/config": "workspace:*",
+    "@cloudbrowsers/config": "workspace:*",
     "@cloudflare/containers": "^0.0.31",
     "@cloudflare/workers-types": "catalog:",
     "@types/node": "catalog:",
