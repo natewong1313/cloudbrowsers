@@ -18,7 +18,7 @@ pub struct BrowserSession {
 impl BrowserSession {
     pub async fn launch() -> anyhow::Result<Self> {
         tracing::info!("Starting browser session launch...");
-        
+
         let id = Uuid::new_v4();
         let tmp_dir = tempdir()?;
 
@@ -32,9 +32,8 @@ impl BrowserSession {
 
         tracing::info!("Building browser configuration...");
         let config = match BrowserConfig::builder()
-            .with_head()
-            // .new_headless_mode()
             .user_data_dir(tmp_dir.path())
+            .new_headless_mode()
             .arg(port_arg)
             .arg("--no-sandbox")
             .arg("--disable-setuid-sandbox")
@@ -47,7 +46,7 @@ impl BrowserSession {
             // it returns an error as a string -_-
             Err(err) => return Err(anyhow!("Unknown config error: {}", err)),
         };
-        
+
         tracing::info!("Launching Chrome browser...");
         let (mut browser, handler) = match chromiumoxide::Browser::launch(config).await {
             Ok(result) => result,
