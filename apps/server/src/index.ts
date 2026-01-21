@@ -18,6 +18,16 @@ app.use(
   }),
 );
 
+const USER = "nate";
+
+/**
+ * dont like this api but it gets the job done
+ */
+app.post("/session/new", async (c) => {
+  await env.CONTAINERS_QUEUE.send({ userId: USER });
+  return c.json({ hello: "world" });
+});
+
 app.get("/connect", (c) => {
   console.log("get do instance");
   const stub = env.CONTAINER_ROUTER_DO.getByName("test");
