@@ -2,7 +2,9 @@ import { env } from "cloudflare:workers";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
-export { ContainerRouter } from "./container-router";
+import type { BrowserContainerId } from "./browser-container/container";
+
+export { BrowserContainerSidecar } from "./durable-objects/browser-container-sidecar";
 export { BrowserContainer } from "./browser-container/container";
 
 const app = new Hono();
@@ -23,14 +25,15 @@ const USER = "nate";
 /**
  * dont like this api but it gets the job done
  */
-app.post("/session/new", async (c) => {
+app.post("/sessions/new", async (c) => {
   await env.CONTAINERS_QUEUE.send({ userId: USER });
   return c.json({ hello: "world" });
 });
 
 app.get("/connect", (c) => {
-  console.log("get do instance");
-  const stub = env.CONTAINER_ROUTER_DO.getByName("test");
+  const stub = env.BROWSER_CONTAINER_SIDECAR_DO.getByName("test", {
+    locationHint: "enam",
+  });
   console.log("forward to do instance");
   return stub.fetch(c.req.raw);
 });

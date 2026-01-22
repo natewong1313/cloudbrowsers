@@ -1,7 +1,11 @@
 use anyhow::Context;
 use axum::extract::WebSocketUpgrade;
 use axum::extract::ws::WebSocket;
-use axum::{Router, response::IntoResponse, routing::any};
+use axum::{
+    Router,
+    response::IntoResponse,
+    routing::{any, get},
+};
 use chromiumoxide::Browser;
 use futures::stream::{SplitSink, SplitStream};
 use futures_util::{sink::SinkExt, stream::StreamExt};
@@ -13,7 +17,9 @@ use tungstenite::client::IntoClientRequest;
 use crate::browser_session::{self, BrowserSession};
 
 pub async fn serve() -> anyhow::Result<(), anyhow::Error> {
-    let app = Router::new().route("/connect", any(ws_handler));
+    let app = Router::new()
+        // .route("/new", get(new_session_handler))
+        .route("/connect", any(ws_handler));
     let listener = tokio::net::TcpListener::bind("0.0.0.0:6700").await.unwrap();
     tracing::info!("listening on {}", listener.local_addr().unwrap());
     axum::serve(
