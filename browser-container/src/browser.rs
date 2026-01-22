@@ -1,0 +1,124 @@
+use anyhow::anyhow;
+use chromiumoxide::BrowserConfig;
+use futures::StreamExt;
+use port_check::free_local_port;
+use std::{env, time::Duration};
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind};
+use tempfile::tempdir;
+use tokio::{task::JoinHandle, time::sleep};
+use uuid::Uuid;
+
+pub struct BrowserInstanceWrapper {
+    pub id: Uuid,
+    pub browser: chromiumoxide::Browser,
+    pub pid: u32,
+    pub poller_handle: JoinHandle<()>,
+    pub watchdog_handle: JoinHandle<()>,
+}
+impl BrowserInstanceWrapper {
+    pub async fn new() -> anyhow::Result<Self> {
+        let user_data_dir = tempdir()?;
+
+        let Some(free_port) = free_local_port() else {
+            return Err(anyhow!("could not get a free local port"));
+        };
+
+        let mut base_conf = BrowserConfig::builder()
+            .user_data_dir(user_data_dir)
+            .arg(format!("--remote-debugging-port={}", free_port))
+            .arg("--no-sandbox")
+            .arg("--disable-setuid-sandbox")
+            .arg("--disable-dev-shm-usage")
+            .arg("--disable-gpu")
+            .arg("--single-process");
+        if env::var("IN_CLOUDFLARE_ENV").unwrap_or_default() == "true" {
+            base_conf = base_conf.new_headless_mode()
+        } else {
+            base_conf = base_conf.with_head()
+        }
+
+        let browser_conf = match base_conf.build() {
+            Ok(config) => config,
+            Err(err) => return Err(anyhow!("unknown config error: {}", err)),
+        };
+
+        let (mut browser, handler) = chromiumoxide::Browser::launch(browser_conf).await?;
+
+        // Once we have the browser we can get the pids and spawn pollers
+        let pid = browser
+            .get_mut_child()
+            .ok_or_else(|| anyhow!("error getting browser child proc"))?
+            .as_mut_inner()
+            .id()
+            .ok_or_else(|| anyhow!("no pid from browser child proc"))?;
+        let poller_handle = tokio::spawn(async move {
+            if let Err(err) = Self::browser_handler_loop(handler).await {
+                tracing::warn!("{}", err);
+            };
+        });
+        let watchdog_handle = tokio::spawn(async move {
+            if let Err(err) = Self::watchdog_loop(pid).await {
+                tracing::warn!("{}", err);
+            };
+        });
+
+        Ok(BrowserInstanceWrapper {
+            id: Uuid::new_v4(),
+            browser,
+            pid,
+            poller_handle,
+            watchdog_handle,
+        })
+    }
+
+    pub async fn cleanup(&mut self) {
+        self.poller_handle.abort();
+        self.watchdog_handle.abort();
+
+        // we can ignore errors here
+        if let Some(child) = self.browser.get_mut_child() {
+            // kill child process
+            let _ = child.kill().await;
+        }
+        let _ = self.browser.close().await;
+    }
+
+    // required by chromiumoxide
+    async fn browser_handler_loop(mut handler: chromiumoxide::Handler) -> anyhow::Result<()> {
+        while let Some(event) = handler.next().await {
+            if let Err(err) = event {
+                return Err(anyhow!("unexpected browser handler error: {}", err));
+            }
+        }
+        Ok(())
+    }
+
+    // monitor memory, cpu usage. currently doesn't do anything to kill the process / handle noisy
+    // neighbor issues
+    async fn watchdog_loop(pid: u32) -> anyhow::Result<()> {
+        let s_pid = sysinfo::Pid::from_u32(pid);
+        let monitoring_attrs = ProcessRefreshKind::nothing().with_memory().with_cpu();
+        let mut monitoring_instance = sysinfo::System::new_with_specifics(
+            RefreshKind::nothing().with_processes(monitoring_attrs),
+        );
+
+        loop {
+            if let Some(p) = monitoring_instance.process(s_pid)
+                && p.exists()
+            {
+                let mem = p.memory() as f64 / 1_000_000.0;
+                let cpu = p.cpu_usage();
+                println!("memory: {}mb | cpu: {}%", mem, cpu);
+
+                monitoring_instance.refresh_processes_specifics(
+                    ProcessesToUpdate::Some(&[s_pid]),
+                    true,
+                    monitoring_attrs,
+                );
+                sleep(Duration::from_millis(100)).await;
+            } else {
+                return Ok(());
+            }
+        }
+    }
+}

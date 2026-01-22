@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.100"
+axum = "0.8.8"
 chromiumoxide = "0.8.0"
+futures = "0.3.31"
+port_check = "0.3.0"
+sysinfo = "0.37.2"
+tempfile = "3.24.0"
 tokio = "1.49.0"
 tracing = "0.1.44"
+uuid = { version = "1.19.0", features = ["v4"] }
