@@ -1,14 +1,31 @@
-use axum::{Router, routing::get};
+use crate::browser_scheduler::BrowserScheduler;
+use axum::{Router, extract::State, http::StatusCode, routing::get};
+use std::sync::Arc;
 use tokio::signal;
-
-use crate::browser::BrowserInstanceWrapper;
 
 pub mod browser;
 pub mod browser_scheduler;
 
+#[derive(Clone)]
+struct AppState {
+    scheduler: Arc<BrowserScheduler>,
+}
+
 #[tokio::main]
 async fn main() {
-    let app = Router::new().route("/new", get(new_instance));
+    let scheduler = BrowserScheduler::new().expect("failed to create browser scheduler");
+    scheduler
+        .warmup()
+        .await
+        .expect("failed to warm up browser pool");
+
+    let app_state = AppState {
+        scheduler: Arc::new(scheduler),
+    };
+    let app = Router::new()
+        .route("/new", get(new_instance))
+        .with_state(app_state);
+
     let listener = tokio::net::TcpListener::bind("0.0.0.0:6700").await.unwrap();
     println!("listening on {}", listener.local_addr().unwrap());
     axum::serve(listener, app)
@@ -17,10 +34,14 @@ async fn main() {
         .unwrap();
 }
 
-async fn new_instance() -> String {
-    let instance = BrowserInstanceWrapper::new().await.unwrap();
-    let ws_addr = instance.browser.websocket_address();
-    return ws_addr.clone();
+async fn new_instance(State(state): State<AppState>) -> Result<String, (StatusCode, String)> {
+    let (_, ws_addr) = state
+        .scheduler
+        .request_instance()
+        .await
+        // shouldn't publicly expose the error but im gonna refactor error handling anyways
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    return Ok(ws_addr);
 }
 
 async fn shutdown_signal() {

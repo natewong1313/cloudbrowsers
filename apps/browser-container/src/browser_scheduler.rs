@@ -18,7 +18,7 @@ const MAX_WARMUP_ATTEMPTS: u32 = 10;
 impl BrowserScheduler {
     /// The BrowserScheduler maintains the pool of browsers
     /// You should go through this API in order to provision browsers
-    pub async fn new() -> anyhow::Result<Self> {
+    pub fn new() -> anyhow::Result<Self> {
         let browsers = Arc::new(Mutex::new(HashMap::new()));
 
         return Ok(Self { browsers });
@@ -34,7 +34,7 @@ impl BrowserScheduler {
             let remaining = MAX_BROWSERS - spawned;
 
             // chromiumoxide isn't cpu bound, since we only have the orchestration overhead
-            let futures: Vec<_> = (0..remaining).map(|_| self.add_instance()).collect();
+            let futures: Vec<_> = (0..remaining).map(|_| self.request_instance()).collect();
             let results = futures::future::join_all(futures).await;
             for result in results {
                 match result {
@@ -67,15 +67,17 @@ impl BrowserScheduler {
     }
 
     /// Adds a new browser instance and loads a new page
-    pub async fn add_instance(&self) -> anyhow::Result<Uuid> {
+    /// For now, this returns the instance id and its websocket connection
+    pub async fn request_instance(&self) -> anyhow::Result<(Uuid, String)> {
         let browser = BrowserInstanceWrapper::new().await?;
         let browser_id = browser.id;
+        let browser_ws = browser.browser.websocket_address().clone();
 
         self.browsers
             .lock()
             .map_err(|err| anyhow!("could not acquire browser lock: {}", err))?
             .insert(browser_id, browser);
 
-        Ok(browser_id)
+        Ok((browser_id, browser_ws))
     }
 }
