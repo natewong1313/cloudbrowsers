@@ -12,7 +12,10 @@
       "typescript": "^5",
       "@types/node": "^22.13.11",
       "@cloudflare/workers-types": "^4.20251213.0",
-      "better-auth": "^1.4.7"
+      "better-auth": "^1.4.7",
+      "alchemy": "^0.81.2",
+      "tsdown": "^0.16.5",
+      "wrangler": "^4.54.0"
     }
   },
   "type": "module",

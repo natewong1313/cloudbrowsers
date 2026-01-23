@@ -1,2 +1,1 @@
-bun alchemy configure
-
+deprecated

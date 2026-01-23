@@ -16,6 +16,9 @@ pub struct BrowserInstanceWrapper {
     pub watchdog_handle: JoinHandle<()>,
 }
 impl BrowserInstanceWrapper {
+    /// Creates a new browser instance
+    /// This will also spawn the chromiumoxide poller and the watchdog
+    /// You will need to call cleanup() whenever finished
     pub async fn new() -> anyhow::Result<Self> {
         let user_data_dir = tempdir()?;
 
@@ -31,7 +34,7 @@ impl BrowserInstanceWrapper {
             .arg("--disable-dev-shm-usage")
             .arg("--disable-gpu")
             .arg("--single-process");
-        if env::var("IN_CLOUDFLARE_ENV").unwrap_or_default() == "true" {
+        if env::var("IN_DOCKER").unwrap_or_default() == "true" {
             base_conf = base_conf.new_headless_mode()
         } else {
             base_conf = base_conf.with_head()
@@ -43,6 +46,8 @@ impl BrowserInstanceWrapper {
         };
 
         let (mut browser, handler) = chromiumoxide::Browser::launch(browser_conf).await?;
+
+        browser.new_page("https://www.example.com").await?;
 
         // Once we have the browser we can get the pids and spawn pollers
         let pid = browser
@@ -83,7 +88,7 @@ impl BrowserInstanceWrapper {
         let _ = self.browser.close().await;
     }
 
-    // required by chromiumoxide
+    /// Poll the chromiumoxide events
     async fn browser_handler_loop(mut handler: chromiumoxide::Handler) -> anyhow::Result<()> {
         while let Some(event) = handler.next().await {
             if let Err(err) = event {
@@ -93,15 +98,14 @@ impl BrowserInstanceWrapper {
         Ok(())
     }
 
-    // monitor memory, cpu usage. currently doesn't do anything to kill the process / handle noisy
-    // neighbor issues
+    /// monitor memory, cpu usage. currently doesn't do anything to kill the process
+    /// and does not handle noisy neighbor issues
     async fn watchdog_loop(pid: u32) -> anyhow::Result<()> {
         let s_pid = sysinfo::Pid::from_u32(pid);
         let monitoring_attrs = ProcessRefreshKind::nothing().with_memory().with_cpu();
         let mut monitoring_instance = sysinfo::System::new_with_specifics(
             RefreshKind::nothing().with_processes(monitoring_attrs),
         );
-
         loop {
             if let Some(p) = monitoring_instance.process(s_pid)
                 && p.exists()
