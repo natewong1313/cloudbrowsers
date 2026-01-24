@@ -1,5 +1,19 @@
 use crate::browser_scheduler::BrowserScheduler;
-use axum::{Router, extract::State, http::StatusCode, routing::get};
+use axum::{
+    Router,
+    extract::{
+        State, WebSocketUpgrade,
+        ws::{Message, WebSocket},
+    },
+    http::StatusCode,
+    response::Response,
+    routing::{any, get},
+};
+use futures::{
+    StreamExt,
+    stream::{SplitSink, SplitStream},
+};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::signal;
 
@@ -23,7 +37,7 @@ async fn main() {
         scheduler: Arc::new(scheduler),
     };
     let app = Router::new()
-        .route("/new", get(new_instance))
+        .route("/ws", any(ws_handler))
         .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:6700").await.unwrap();
@@ -32,6 +46,19 @@ async fn main() {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
+}
+
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+    ws.on_upgrade(|socket| new_ws_connection(socket, state))
+}
+
+/// Handles a new client connection
+async fn new_ws_connection(mut socket: WebSocket, state: AppState) {
+    let (mut sender, mut receiver) = socket.split();
+
+    state.scheduler.register_do_client(sender);
+
+    while let Some(Ok(msg)) = receiver.next().await {}
 }
 
 async fn new_instance(State(state): State<AppState>) -> Result<String, (StatusCode, String)> {
