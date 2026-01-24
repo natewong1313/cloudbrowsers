@@ -17,6 +17,10 @@
       "cache": false,
       "persistent": true
     },
+    "logs": {
+      "cache": false,
+      "persistent": true
+    },
     "db:push": {
       "cache": false,
       "persistent": true
