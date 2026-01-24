@@ -13,6 +13,7 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::signal;
+use tracing_subscriber::EnvFilter;
 
 pub mod browser;
 pub mod browser_scheduler;
@@ -24,6 +25,15 @@ struct AppState {
 
 #[tokio::main]
 async fn main() {
+    // Initialize tracing subscriber with human-readable output
+    // Default level is DEBUG, override with RUST_LOG env var
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::from_default_env()
+                .add_directive(tracing::Level::DEBUG.into()),
+        )
+        .init();
+
     let scheduler = Arc::new(BrowserScheduler::new().expect("failed to create browser scheduler"));
 
     let app_state = AppState {
@@ -36,11 +46,11 @@ async fn main() {
         .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:6700").await.unwrap();
-    println!("listening on {}", listener.local_addr().unwrap());
+    tracing::info!("listening on {}", listener.local_addr().unwrap());
 
     tokio::spawn(async move {
         if let Err(e) = scheduler.warmup().await {
-            eprintln!("failed to warm up browser pool: {}", e)
+            tracing::error!("failed to warm up browser pool: {}", e)
         }
     });
 
@@ -59,7 +69,9 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Resp
 }
 
 /// Handles a new client connection
+#[tracing::instrument(skip_all, fields(conn_id = %uuid::Uuid::new_v4()))]
 async fn new_ws_connection(socket: WebSocket, state: AppState) {
+    tracing::info!("new websocket connection");
     let (sender, mut receiver) = socket.split();
 
     // TODO: refactor
@@ -68,12 +80,15 @@ async fn new_ws_connection(socket: WebSocket, state: AppState) {
 
     while let Some(Ok(msg)) = receiver.next().await {
         if let Err(e) = handle_new_message(msg, &state).await {
-            eprintln!("error handling message: {}", e);
+            tracing::error!("error handling message: {}", e);
         };
     }
+    tracing::info!("websocket connection closed");
 }
 
+#[tracing::instrument(skip_all)]
 async fn handle_new_message(msg: Message, state: &AppState) -> anyhow::Result<()> {
+    tracing::debug!("handling incoming message");
     let parsed_msg = get_parsed_msg(msg)?;
 
     match parsed_msg.msg_type {

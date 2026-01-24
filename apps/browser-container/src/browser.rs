@@ -19,7 +19,9 @@ impl BrowserInstanceWrapper {
     /// Creates a new browser instance
     /// This will also spawn the chromiumoxide poller and the watchdog
     /// You will need to call cleanup() whenever finished
+    #[tracing::instrument(name = "browser_new")]
     pub async fn new() -> anyhow::Result<Self> {
+        tracing::debug!("creating new browser instance");
         let user_data_dir = tempdir()?;
 
         let Some(free_port) = free_local_port() else {
@@ -67,8 +69,10 @@ impl BrowserInstanceWrapper {
             };
         });
 
+        let id = Uuid::new_v4();
+        tracing::info!(browser_id = %id, pid = pid, "browser instance created");
         Ok(BrowserInstanceWrapper {
-            id: Uuid::new_v4(),
+            id,
             browser,
             pid,
             poller_handle,
@@ -76,7 +80,9 @@ impl BrowserInstanceWrapper {
         })
     }
 
+    #[tracing::instrument(skip(self), fields(browser_id = %self.id))]
     pub async fn cleanup(&mut self) {
+        tracing::info!("cleaning up browser instance");
         self.poller_handle.abort();
         self.watchdog_handle.abort();
 
@@ -86,6 +92,7 @@ impl BrowserInstanceWrapper {
             let _ = child.kill().await;
         }
         let _ = self.browser.close().await;
+        tracing::debug!("browser cleanup complete");
     }
 
     /// Poll the chromiumoxide events
@@ -112,7 +119,7 @@ impl BrowserInstanceWrapper {
             {
                 let mem = p.memory() as f64 / 1_000_000.0;
                 let cpu = p.cpu_usage();
-                println!("memory: {}mb | cpu: {}%", mem, cpu);
+                tracing::debug!(memory_mb = %mem, cpu_pct = %cpu, pid = pid, "browser watchdog");
 
                 monitoring_instance.refresh_processes_specifics(
                     ProcessesToUpdate::Some(&[s_pid]),

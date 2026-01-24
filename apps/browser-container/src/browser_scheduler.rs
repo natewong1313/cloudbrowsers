@@ -42,7 +42,9 @@ impl BrowserScheduler {
 
     /// "warm up" the pool by opening up MAX_BROWSERS
     /// will continuosly attempt to satisfy spawning all browsers
+    #[tracing::instrument(skip(self), name = "warmup")]
     pub async fn warmup(&self) -> anyhow::Result<()> {
+        tracing::info!(max_browsers = MAX_BROWSERS, "starting browser pool warmup");
         let mut spawned = 0;
         let mut attempts = 0;
 
@@ -55,7 +57,7 @@ impl BrowserScheduler {
             for result in results {
                 match result {
                     Ok(_) => spawned += 1,
-                    Err(err) => eprintln!("Failed to spawn browser instance: {}", err),
+                    Err(err) => tracing::warn!("failed to spawn browser instance: {}", err),
                 }
             }
             // If we spawned 0 on the first pass then somethings wrong
@@ -73,12 +75,15 @@ impl BrowserScheduler {
         }
 
         if spawned < MAX_BROWSERS {
-            eprintln!(
-                "only spawned {}/{} browsers after {} attempts",
-                spawned, MAX_BROWSERS, attempts
+            tracing::warn!(
+                spawned,
+                max = MAX_BROWSERS,
+                attempts,
+                "partial warmup - not all browsers spawned"
             );
         }
 
+        tracing::info!(spawned, "browser pool warmup complete");
         Ok(())
     }
 
@@ -100,7 +105,7 @@ impl BrowserScheduler {
             };
             client.send(Message::Text(encoded.into())).await?;
         } else {
-            eprint!("tried to publish state but no client connection");
+            tracing::warn!("tried to publish state but no client connection");
         }
         Ok(())
     }
@@ -110,7 +115,9 @@ impl BrowserScheduler {
     /// TODO: right now, this is called by warmup and new(). when warming up we have the guarantee
     /// that we aren't accepting any session reqeuests so we dont care about exceeding limits
     /// however, we care about not exceeding browser capacity
+    #[tracing::instrument(skip(self), name = "request_instance")]
     pub async fn request_instance(&self) -> anyhow::Result<(Uuid, String)> {
+        tracing::debug!("browser instance requested");
         self.new_browser().await
     }
 
@@ -121,12 +128,14 @@ impl BrowserScheduler {
     }
 
     /// Inserts a browser into the pool, updates state, and publishes to DO
+    #[tracing::instrument(skip(self, browser), fields(browser_id = %browser.id))]
     async fn register_new_browser(
         &self,
         browser: BrowserInstanceWrapper,
     ) -> anyhow::Result<(Uuid, String)> {
         let browser_id = browser.id;
         let browser_ws = browser.browser.websocket_address().clone();
+        tracing::debug!("registering new browser in pool");
 
         {
             let mut browsers = self.browsers.lock().await;
@@ -136,13 +145,15 @@ impl BrowserScheduler {
             browsers.insert(browser_id, browser);
         }
 
-        {
+        let new_size = {
             let mut state = self.state.lock().await;
             state.size += 1;
-        }
+            state.size
+        };
 
         self.publish_state().await?;
 
+        tracing::info!(pool_size = new_size, "browser registered in pool");
         Ok((browser_id, browser_ws))
     }
 }
