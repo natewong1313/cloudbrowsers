@@ -12,23 +12,28 @@ import {
 export class BrowserContainerDurableObject extends DurableObject {
   container!: DurableObjectStub<BrowserContainer>;
   private ws: WebSocket | null = null;
-  private reconnectAttempts = 0;
 
+  private log(...msg: any[]) {
+    console.log("[BrowserContainerDurableObject]", ...msg);
+  }
   /**
    * Creates and starts the underlying container, then opens the websocket connection
    */
   async init() {
     const start = performance.now();
+
     const containerId = newBrowserContainerId();
+    this.log("getting container", containerId);
     this.container = getContainer(env.BROWSER_CONTAINER, containerId);
 
+    this.log("initializing container", containerId);
     await this.container.init(containerId);
+    this.log("connecting to container websocket", containerId);
     this.connectToInternalContainerWS(); // this.ctx.waitUntil(this.connectToInternalContainerWS());
-    console.log("initialized container in", performance.now() - start, "ms");
+    this.log("initialized container in", performance.now() - start, "ms");
   }
 
   private async connectToInternalContainerWS() {
-    // Create a WebSocket upgrade request targeting the container's /ws endpoint
     const wsRequest = switchPort(
       new Request("http://container/ws", {
         headers: {
@@ -38,53 +43,20 @@ export class BrowserContainerDurableObject extends DurableObject {
       BROWSER_CONTAINER_WS_PORT,
     );
 
-    console.log(
-      "Connecting to container WebSocket on port",
-      BROWSER_CONTAINER_WS_PORT,
-    );
+    this.log("connecting to container ws at", BROWSER_CONTAINER_WS_PORT);
 
-    try {
-      const response = await this.container.fetch(wsRequest);
-
-      this.ws = response.webSocket;
-      if (!this.ws) {
-        console.error("Expected WebSocket response but got HTTP response");
-        this.scheduleReconnect();
-        return;
-      }
-
-      this.ws.accept();
-
-      this.ws.addEventListener("open", () => {
-        console.log("Connected to container WebSocket");
-        this.reconnectAttempts = 0;
-      });
-
-      this.ws.addEventListener("message", (event) => {
-        console.log("Container WS message:", event.data);
-      });
-
-      this.ws.addEventListener("close", () => {
-        console.log("Container WS closed, scheduling reconnect...");
-        this.scheduleReconnect();
-      });
-
-      this.ws.addEventListener("error", (error) => {
-        console.error("Container WS error:", error);
-      });
-    } catch (error) {
-      console.error("Failed to connect to container WebSocket:", error);
-      this.scheduleReconnect();
+    const response = await this.container.fetch(wsRequest);
+    this.ws = response.webSocket;
+    if (!this.ws) {
+      this.log("failed to connect to websocket");
+      return;
     }
-  }
-
-  private scheduleReconnect() {
-    const delay = Math.min(1000 * 2 ** this.reconnectAttempts, 30000);
-    this.reconnectAttempts++;
-    console.log(
-      `Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`,
-    );
-    setTimeout(() => this.connectToInternalContainerWS(), delay);
+    this.ws.addEventListener("message", (event) => {
+      this.log("recv message", event.data);
+    });
+    this.ws.addEventListener("error", ({ error }) => {
+      this.log("container ws error", error);
+    });
   }
 
   async newSession() {

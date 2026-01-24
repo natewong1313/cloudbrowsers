@@ -36,8 +36,10 @@ impl BrowserInstanceWrapper {
 
         let browser_config = base_config
             .user_data_dir(user_data_dir)
+            .no_sandbox()
             .arg(format!("--remote-debugging-port={}", free_port))
             .arg("--single-process")
+            .arg("--disable-setuid-sandbox")
             .build()
             .map_err(|e| anyhow::anyhow!(e))?;
 
