@@ -3,11 +3,8 @@ use anyhow::anyhow;
 use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, stream::SplitSink};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
-use tokio::sync::Mutex as TokioMutex;
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 type DOClientConnection = SplitSink<WebSocket, Message>;
@@ -16,7 +13,7 @@ pub struct BrowserScheduler {
     state: Arc<Mutex<CurrentState>>,
     browsers: Arc<Mutex<HashMap<Uuid, BrowserInstanceWrapper>>>,
     /// DO client connection, used for syncing
-    do_client: Arc<TokioMutex<Option<DOClientConnection>>>,
+    do_client: Arc<Mutex<Option<DOClientConnection>>>,
 }
 
 /// Just the amount of browsers for now
@@ -36,13 +33,11 @@ impl BrowserScheduler {
     /// The BrowserScheduler maintains the pool of browsers
     /// You should go through this API in order to provision browsers
     pub fn new() -> anyhow::Result<Self> {
-        let browsers = Arc::new(Mutex::new(HashMap::new()));
-
-        return Ok(Self {
+        Ok(Self {
             state: Arc::new(Mutex::new(CurrentState { size: 0 })),
-            browsers,
-            do_client: Arc::new(TokioMutex::new(None)),
-        });
+            browsers: Arc::new(Mutex::new(HashMap::new())),
+            do_client: Arc::new(Mutex::new(None)),
+        })
     }
 
     /// "warm up" the pool by opening up MAX_BROWSERS
@@ -100,10 +95,7 @@ impl BrowserScheduler {
 
         if let Some(client) = guard.as_mut() {
             let encoded = {
-                let state = self
-                    .state
-                    .lock()
-                    .map_err(|err| anyhow!("failed to acquire state lock: {}", err))?;
+                let state = self.state.lock().await;
                 serde_json::to_string(&*state)?
             };
             client.send(Message::Text(encoded.into())).await?;
@@ -136,24 +128,19 @@ impl BrowserScheduler {
         let browser_id = browser.id;
         let browser_ws = browser.browser.websocket_address().clone();
 
-        let mut browsers = self
-            .browsers
-            .lock()
-            .map_err(|err| anyhow!("could not acquire browser lock: {}", err))?;
-        if browsers.len() >= MAX_BROWSERS {
-            return Err(anyhow!("exceeded browser capacity"));
+        {
+            let mut browsers = self.browsers.lock().await;
+            if browsers.len() >= MAX_BROWSERS {
+                return Err(anyhow!("exceeded browser capacity"));
+            }
+            browsers.insert(browser_id, browser);
         }
-        browsers.insert(browser_id, browser);
 
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|err| anyhow!("failed to acquire state lock: {}", err))?;
-        state.size += 1;
+        {
+            let mut state = self.state.lock().await;
+            state.size += 1;
+        }
 
-        // dont want to hold locks anymore
-        drop(state);
-        drop(browsers);
         self.publish_state().await?;
 
         Ok((browser_id, browser_ws))

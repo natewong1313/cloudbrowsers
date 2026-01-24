@@ -26,7 +26,8 @@
     "dev:server": "turbo -F server dev",
     "dev:tester": "turbo -F tester dev",
     "db:push": "turbo -F @cloudbrowsers/db db:push",
-    "db:generate": "turbo -F @cloudbrowsers/db db:generate"
+    "db:generate": "turbo -F @cloudbrowsers/db db:generate",
+    "cleanup": " docker ps -q --filter 'name=workerd-cloudbrowsers' | xargs docker kill"
   },
   "dependencies": {
     "dotenv": "catalog:",

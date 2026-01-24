@@ -2,8 +2,8 @@ use crate::browser_scheduler::BrowserScheduler;
 use axum::{
     Router,
     extract::{State, WebSocketUpgrade, ws::WebSocket},
-    response::Response,
-    routing::any,
+    response::{IntoResponse, Response},
+    routing::{any, get},
 };
 use futures::StreamExt;
 use std::sync::Arc;
@@ -19,25 +19,34 @@ struct AppState {
 
 #[tokio::main]
 async fn main() {
-    let scheduler = BrowserScheduler::new().expect("failed to create browser scheduler");
-    scheduler
-        .warmup()
-        .await
-        .expect("failed to warm up browser pool");
+    let scheduler = Arc::new(BrowserScheduler::new().expect("failed to create browser scheduler"));
 
     let app_state = AppState {
-        scheduler: Arc::new(scheduler),
+        scheduler: scheduler.clone(),
     };
+
     let app = Router::new()
+        .route("/ping", get(health_handler))
         .route("/ws", any(ws_handler))
         .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:6700").await.unwrap();
     println!("listening on {}", listener.local_addr().unwrap());
+
+    tokio::spawn(async move {
+        if let Err(e) = scheduler.warmup().await {
+            eprintln!("failed to warm up browser pool: {}", e)
+        }
+    });
+
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
+}
+
+async fn health_handler() -> impl IntoResponse {
+    "ok"
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
