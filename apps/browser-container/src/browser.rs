@@ -28,41 +28,36 @@ impl BrowserInstanceWrapper {
             return Err(anyhow!("could not get a free local port"));
         };
 
-        let mut base_conf = BrowserConfig::builder()
-            .user_data_dir(user_data_dir)
-            .arg(format!("--remote-debugging-port={}", free_port))
-            .arg("--no-sandbox")
-            .arg("--disable-setuid-sandbox")
-            .arg("--disable-dev-shm-usage")
-            .arg("--disable-gpu")
-            .arg("--single-process");
+        let mut base_config = BrowserConfig::builder().with_head();
         if env::var("IN_DOCKER").unwrap_or_default() == "true" {
-            base_conf = base_conf.new_headless_mode()
-        } else {
-            base_conf = base_conf.with_head()
+            tracing::debug!("using headless mode");
+            base_config = base_config.new_headless_mode()
         }
 
-        let browser_conf = match base_conf.build() {
-            Ok(config) => config,
-            Err(err) => return Err(anyhow!("unknown config error: {}", err)),
-        };
+        let browser_config = base_config
+            .user_data_dir(user_data_dir)
+            .arg(format!("--remote-debugging-port={}", free_port))
+            .arg("--single-process")
+            .build()
+            .map_err(|e| anyhow::anyhow!(e))?;
 
-        let (mut browser, handler) = chromiumoxide::Browser::launch(browser_conf).await?;
+        let (mut browser, handler) = chromiumoxide::Browser::launch(browser_config).await?;
 
-        browser.new_page("https://www.example.com").await?;
+        // Must poll before doing any events
+        let poller_handle = tokio::spawn(async move {
+            if let Err(err) = Self::browser_handler_loop(handler).await {
+                tracing::warn!("{}", err);
+            };
+        });
 
-        // Once we have the browser we can get the pids and spawn pollers
+        // the browser itself runs in a seperate process
         let pid = browser
             .get_mut_child()
             .ok_or_else(|| anyhow!("error getting browser child proc"))?
             .as_mut_inner()
             .id()
             .ok_or_else(|| anyhow!("no pid from browser child proc"))?;
-        let poller_handle = tokio::spawn(async move {
-            if let Err(err) = Self::browser_handler_loop(handler).await {
-                tracing::warn!("{}", err);
-            };
-        });
+
         let watchdog_handle = tokio::spawn(async move {
             if let Err(err) = Self::watchdog_loop(pid).await {
                 tracing::warn!("{}", err);
@@ -119,7 +114,7 @@ impl BrowserInstanceWrapper {
             {
                 let mem = p.memory() as f64 / 1_000_000.0;
                 let cpu = p.cpu_usage();
-                tracing::debug!(memory_mb = %mem, cpu_pct = %cpu, pid = pid, "browser watchdog");
+                // tracing::debug!(memory_mb = %mem, cpu_pct = %cpu, pid = pid, "browser watchdog");
 
                 monitoring_instance.refresh_processes_specifics(
                     ProcessesToUpdate::Some(&[s_pid]),

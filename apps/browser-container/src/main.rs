@@ -10,7 +10,7 @@ use axum::{
     routing::{any, get},
 };
 use futures::StreamExt;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 use tokio::signal;
 use tracing_subscriber::EnvFilter;
@@ -28,10 +28,7 @@ async fn main() {
     // Initialize tracing subscriber with human-readable output
     // Default level is DEBUG, override with RUST_LOG env var
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::from_default_env()
-                .add_directive(tracing::Level::DEBUG.into()),
-        )
+        .with_env_filter(EnvFilter::from_default_env().add_directive(tracing::Level::DEBUG.into()))
         .init();
 
     let scheduler = Arc::new(BrowserScheduler::new().expect("failed to create browser scheduler"));

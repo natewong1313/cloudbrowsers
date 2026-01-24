@@ -25,7 +25,7 @@ pub struct CurrentState {
 }
 
 // safe to hard code this for now since we can't change instance type dynamically
-const MAX_BROWSERS: usize = 3;
+const MAX_BROWSERS: usize = 2;
 // If we can't setup all {MAX_BROWSERS} after 10 attempts somethings fucked
 const MAX_WARMUP_ATTEMPTS: u32 = 10;
 
@@ -85,6 +85,15 @@ impl BrowserScheduler {
 
         tracing::info!(spawned, "browser pool warmup complete");
         Ok(())
+    }
+
+    /// Close all opened browsers
+    pub async fn cleanup(&self) {
+        let mut browsers = self.browsers.lock().await;
+        for browser in browsers.values_mut() {
+            browser.cleanup().await;
+        }
+        browsers.clear();
     }
 
     /// Registers a new connected durable object client
