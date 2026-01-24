@@ -1,11 +1,16 @@
 use crate::browser_scheduler::BrowserScheduler;
+use anyhow::anyhow;
 use axum::{
     Router,
-    extract::{State, WebSocketUpgrade, ws::WebSocket},
+    extract::{
+        State, WebSocketUpgrade,
+        ws::{Message, WebSocket},
+    },
     response::{IntoResponse, Response},
     routing::{any, get},
 };
 use futures::StreamExt;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::signal;
 
@@ -61,9 +66,40 @@ async fn new_ws_connection(socket: WebSocket, state: AppState) {
     state.scheduler.register_do_client(sender).await.unwrap();
     state.scheduler.publish_state().await.unwrap();
 
-    while let Some(Ok(_msg)) = receiver.next().await {
-        // handle new_instance
+    while let Some(Ok(msg)) = receiver.next().await {
+        if let Err(e) = handle_new_message(msg, &state).await {
+            eprintln!("error handling message: {}", e);
+        };
     }
+}
+
+async fn handle_new_message(msg: Message, state: &AppState) -> anyhow::Result<()> {
+    let parsed_msg = get_parsed_msg(msg)?;
+
+    match parsed_msg.msg_type {
+        MessageFromDOType::NewBrowserSession => {
+            state.scheduler.request_instance().await?;
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Deserialize)]
+enum MessageFromDOType {
+    NewBrowserSession,
+}
+#[derive(Deserialize)]
+struct MessageFromDO {
+    msg_type: MessageFromDOType,
+}
+
+fn get_parsed_msg(msg: Message) -> anyhow::Result<MessageFromDO> {
+    if let Message::Text(msg) = msg {
+        let parsed_msg = serde_json::from_str::<MessageFromDO>(&msg)?;
+        return Ok(parsed_msg);
+    }
+    Err(anyhow!("invalid message type provided"))
 }
 
 async fn shutdown_signal() {

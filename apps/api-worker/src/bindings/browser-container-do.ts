@@ -6,12 +6,6 @@ import {
   type BrowserContainer,
 } from "./browser-container";
 
-export type BrowserSessionId = string & { __brand: "BrowserSessionId" };
-
-export const newBrowserSessionId = (): BrowserSessionId => {
-  return crypto.randomUUID() as BrowserSessionId;
-};
-
 /**
  * Sidecar durable object alongside the Container which itself is a sidecar to the actual container...
  */
@@ -20,16 +14,17 @@ export class BrowserContainerDurableObject extends DurableObject {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
 
+  /**
+   * Creates and starts the underlying container, then opens the websocket connection
+   */
   async init() {
+    const start = performance.now();
     const containerId = newBrowserContainerId();
     this.container = getContainer(env.BROWSER_CONTAINER, containerId);
 
-    console.log("starting container", containerId);
     await this.container.init(containerId);
-    await this.container.startAndWaitForPorts();
-    console.log("started container");
-    this.connectToInternalContainerWS();
-    // this.ctx.waitUntil(this.connectToInternalContainerWS());
+    this.connectToInternalContainerWS(); // this.ctx.waitUntil(this.connectToInternalContainerWS());
+    console.log("initialized container in", performance.now() - start, "ms");
   }
 
   private async connectToInternalContainerWS() {
@@ -92,8 +87,7 @@ export class BrowserContainerDurableObject extends DurableObject {
     setTimeout(() => this.connectToInternalContainerWS(), delay);
   }
 
-  async newSession(sessionId: BrowserSessionId) {
-    console.log("recv container do req", sessionId);
-    // const resp = await this.container.containerFetch("/");
+  async newSession() {
+    console.log("creating new session");
   }
 }

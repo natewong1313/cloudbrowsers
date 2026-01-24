@@ -1,7 +1,6 @@
 import { env } from "cloudflare:workers";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
-import { newBrowserSessionId } from "./bindings/browser-container-do";
 
 const app = new Hono();
 app.use(logger());
@@ -10,9 +9,7 @@ app.post("/sessions/new", async (c) => {
   const id = env.BROWSER_CONTAINER_DO.newUniqueId();
   const stub = env.BROWSER_CONTAINER_DO.get(id);
   await stub.init();
-
-  const sessionId = newBrowserSessionId();
-  await stub.newSession(sessionId);
+  await stub.newSession();
 
   return c.json({ hello: "world" });
 });

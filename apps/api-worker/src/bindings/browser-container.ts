@@ -22,6 +22,7 @@ export class BrowserContainer extends Container {
 
   async init(id: BrowserContainerId) {
     this.id = id;
+    await this.startAndWaitForPorts();
     // this.ctx.waitUntil(this.startAndWaitForPorts());
   }
 }
