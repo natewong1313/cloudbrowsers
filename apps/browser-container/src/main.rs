@@ -1,19 +1,11 @@
 use crate::browser_scheduler::BrowserScheduler;
 use axum::{
     Router,
-    extract::{
-        State, WebSocketUpgrade,
-        ws::{Message, WebSocket},
-    },
-    http::StatusCode,
+    extract::{State, WebSocketUpgrade, ws::WebSocket},
     response::Response,
-    routing::{any, get},
+    routing::any,
 };
-use futures::{
-    StreamExt,
-    stream::{SplitSink, SplitStream},
-};
-use serde::{Deserialize, Serialize};
+use futures::StreamExt;
 use std::sync::Arc;
 use tokio::signal;
 
@@ -53,22 +45,16 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Resp
 }
 
 /// Handles a new client connection
-async fn new_ws_connection(mut socket: WebSocket, state: AppState) {
-    let (mut sender, mut receiver) = socket.split();
+async fn new_ws_connection(socket: WebSocket, state: AppState) {
+    let (sender, mut receiver) = socket.split();
 
-    state.scheduler.register_do_client(sender);
+    // TODO: refactor
+    state.scheduler.register_do_client(sender).await.unwrap();
+    state.scheduler.publish_state().await.unwrap();
 
-    while let Some(Ok(msg)) = receiver.next().await {}
-}
-
-async fn new_instance(State(state): State<AppState>) -> Result<String, (StatusCode, String)> {
-    let (_, ws_addr) = state
-        .scheduler
-        .request_instance()
-        .await
-        // shouldn't publicly expose the error but im gonna refactor error handling anyways
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    return Ok(ws_addr);
+    while let Some(Ok(_msg)) = receiver.next().await {
+        // handle new_instance
+    }
 }
 
 async fn shutdown_signal() {

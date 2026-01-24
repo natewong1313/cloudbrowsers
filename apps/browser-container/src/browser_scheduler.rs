@@ -7,6 +7,7 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
+use tokio::sync::Mutex as TokioMutex;
 use uuid::Uuid;
 
 type DOClientConnection = SplitSink<WebSocket, Message>;
@@ -15,7 +16,7 @@ pub struct BrowserScheduler {
     state: Arc<Mutex<CurrentState>>,
     browsers: Arc<Mutex<HashMap<Uuid, BrowserInstanceWrapper>>>,
     /// DO client connection, used for syncing
-    do_client: Arc<Mutex<Option<DOClientConnection>>>,
+    do_client: Arc<TokioMutex<Option<DOClientConnection>>>,
 }
 
 /// Just the amount of browsers for now
@@ -40,7 +41,7 @@ impl BrowserScheduler {
         return Ok(Self {
             state: Arc::new(Mutex::new(CurrentState { size: 0 })),
             browsers,
-            do_client: Arc::new(Mutex::new(None)),
+            do_client: Arc::new(TokioMutex::new(None)),
         });
     }
 
@@ -88,27 +89,23 @@ impl BrowserScheduler {
 
     /// Registers a new connected durable object client
     pub async fn register_do_client(&self, do_client: DOClientConnection) -> anyhow::Result<()> {
-        let mut guard = self
-            .do_client
-            .lock()
-            .map_err(|err| anyhow!("failed to acquire do_client lock: {}", err))?;
+        let mut guard = self.do_client.lock().await;
         *guard = Some(do_client);
         Ok(())
     }
 
     /// Keep the DO in sync with the current state
     pub async fn publish_state(&self) -> anyhow::Result<()> {
-        let mut guard = self
-            .do_client
-            .lock()
-            .map_err(|err| anyhow!("failed to acquire do_client lock: {}", err))?;
+        let mut guard = self.do_client.lock().await;
 
         if let Some(client) = guard.as_mut() {
-            let state = self
-                .state
-                .lock()
-                .map_err(|err| anyhow!("failed to acquire state lock: {}", err))?;
-            let encoded = serde_json::to_string(&*state)?;
+            let encoded = {
+                let state = self
+                    .state
+                    .lock()
+                    .map_err(|err| anyhow!("failed to acquire state lock: {}", err))?;
+                serde_json::to_string(&*state)?
+            };
             client.send(Message::Text(encoded.into())).await?;
         } else {
             eprint!("tried to publish state but no client connection");
