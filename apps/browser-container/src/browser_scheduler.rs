@@ -135,6 +135,30 @@ impl BrowserScheduler {
         Err(anyhow!("no available browser instances"))
     }
 
+    pub async fn remove_instance(&self, id: Uuid) -> anyhow::Result<()> {
+        tracing::debug!("removing browser instance");
+
+        let capacity = {
+            let mut browsers = self.browsers.lock().await;
+            browsers.remove_entry(&id);
+
+            let mut capacity = self.capacity.lock().await;
+            tracing::debug!("prev capacity: {}", *capacity);
+            *capacity -= 1;
+            tracing::debug!("new capacity: {}", *capacity);
+            capacity.clone()
+        };
+
+        if capacity < MAX_BROWSERS.try_into().unwrap() {
+            // TODO: maybe silently fail here
+            self.launch_new_browser().await?;
+        } else {
+            tracing::warn!("UNEXPECTED removed browser instance but still at max capacity");
+        }
+
+        Ok(())
+    }
+
     /// Get the WebSocket address for a specific browser instance
     pub async fn get_browser_ws_addr(&self, id: Uuid) -> Option<String> {
         let browsers = self.browsers.lock().await;
@@ -145,6 +169,8 @@ impl BrowserScheduler {
 
     /// Internal function to spawn a instance and register it
     async fn launch_new_browser(&self) -> anyhow::Result<Uuid> {
+        // TODO:retry if creating the browser fails
+        // TODO: need to be more careful with the lock here
         let browser = BrowserInstanceWrapper::new().await?;
         self.register_new_browser(browser).await
     }
