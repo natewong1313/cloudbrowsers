@@ -147,6 +147,12 @@ impl BrowserScheduler {
         Err(anyhow!("no available browser instances"))
     }
 
+    /// Get the WebSocket address for a specific browser instance
+    pub async fn get_browser_ws_addr(&self, id: Uuid) -> Option<String> {
+        let browsers = self.browsers.lock().await;
+        browsers.get(&id).map(|b| b.browser.websocket_address().clone())
+    }
+
     /// Internal function to spawn a instance and register it
     async fn launch_new_browser(&self) -> anyhow::Result<(Uuid, String)> {
         let browser = BrowserInstanceWrapper::new().await?;

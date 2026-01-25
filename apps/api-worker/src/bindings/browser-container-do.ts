@@ -4,6 +4,7 @@ import {
   BROWSER_CONTAINER_WS_PORT,
   newBrowserContainerId,
   type BrowserContainer,
+  type BrowserContainerId,
 } from "./browser-container";
 
 //TODO: we should autogen this from rust types
@@ -20,6 +21,7 @@ type NewBrowserSession = {
  */
 export class BrowserContainerDurableObject extends DurableObject {
   container!: DurableObjectStub<BrowserContainer>;
+  private containerId!: BrowserContainerId;
   private ws: WebSocket | null = null;
   // save container state in memory. kv/sql doesnt make sense for now
   private containerState: BrowserContainerState = { size: 0 };
@@ -33,15 +35,15 @@ export class BrowserContainerDurableObject extends DurableObject {
   async init() {
     const start = performance.now();
 
-    const containerId = newBrowserContainerId();
-    this.log("getting container", containerId);
-    this.container = getContainer(env.BROWSER_CONTAINER, containerId);
+    this.containerId = newBrowserContainerId();
+    this.log("getting container", this.containerId);
+    this.container = getContainer(env.BROWSER_CONTAINER, this.containerId);
 
-    this.log("initializing container", containerId);
-    await this.container.init(containerId);
+    this.log("initializing container", this.containerId);
+    await this.container.init(this.containerId);
     this.log("initialized container in", performance.now() - start, "ms");
 
-    this.log("connecting to container websocket", containerId);
+    this.log("connecting to container websocket", this.containerId);
     await this.connectToInternalContainerWS(); // this.ctx.waitUntil(this.connectToInternalContainerWS());
   }
 
@@ -86,6 +88,7 @@ export class BrowserContainerDurableObject extends DurableObject {
     // TODO: validate that the message is valid since we are mutating state
     const parsed = JSON.parse(data) as BrowserContainerState;
     this.containerState = parsed;
+    // TODO: Use containerState for capacity management
   }
 
   async newSession() {
@@ -102,8 +105,27 @@ export class BrowserContainerDurableObject extends DurableObject {
       throw new Error(`Failed to create new session: ${response.statusText}`);
     }
 
-    const body = (await response.json()) as NewBrowserSession;
-    this.log("new session created:", body);
-    return body;
+    const { id: sessionId } = (await response.json()) as NewBrowserSession;
+    this.log("new session created:", sessionId);
+
+    // Return both the underlying container id and the session id so we can route correctly
+    const wsConnectPath = `/session/${this.containerId}/${sessionId}`;
+    this.log("WebSocket connect path:", wsConnectPath);
+    return { sessionId, wsConnectPath };
   }
+
+  // /**
+  //  * Pass through to container instance
+  //  */
+  // async fetch(request: Request) {
+  //   const url = new URL(request.url);
+  //   // Handle WebSocket proxy requests to browser sessions
+  //   if (url.pathname.startsWith("/session/")) {
+  //     this.log("proxying websocket request to container");
+  //     const proxyRequest = switchPort(request, BROWSER_CONTAINER_WS_PORT);
+  //     return this.container.fetch(proxyRequest);
+  //   }
+  //   this.log("invalid fetch request", url.pathname);
+  //   return new Response("Not Found", { status: 404 });
+  // }
 }

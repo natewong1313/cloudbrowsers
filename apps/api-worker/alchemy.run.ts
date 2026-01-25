@@ -28,6 +28,7 @@ const browserContainer = await Container<BrowserContainer>(
   },
 );
 
+export const API_WORKER_PORT = 7000;
 export const apiWorker = await Worker("api-worker", {
   entrypoint: "src/index.ts",
   compatibility: "node",
@@ -36,7 +37,7 @@ export const apiWorker = await Worker("api-worker", {
     BROWSER_CONTAINER: browserContainer,
   },
   dev: {
-    port: 7000,
+    port: API_WORKER_PORT,
   },
 });
 

@@ -6,12 +6,11 @@ await fetch(`${SERVER_URL}/test`);
 await Bun.sleep(5000);
 
 const response = await fetch(`${SERVER_URL}/sessions/new`, { method: "post" });
-const body = await response.json();
-const wsAddr = body["ws_addr"];
+const body = (await response.json()) as { wsConnectUrl: string };
 
-console.log("connecting to", wsAddr);
+console.log("connecting to", body);
 const browser = await puppeteer.connect({
-  browserWSEndpoint: wsAddr,
+  browserWSEndpoint: body.wsConnectUrl,
 });
 
 console.log("getting pages");
