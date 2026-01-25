@@ -12,7 +12,6 @@ pub struct BrowserInstanceWrapper {
     pub id: Uuid,
     pub in_use: bool,
     pub browser: chromiumoxide::Browser,
-    pid: u32,
     poller_handle: JoinHandle<()>,
     watchdog_handle: JoinHandle<()>,
 }
@@ -75,7 +74,6 @@ impl BrowserInstanceWrapper {
             id,
             in_use: false,
             browser,
-            pid,
             poller_handle,
             watchdog_handle,
         })

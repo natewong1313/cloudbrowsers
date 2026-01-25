@@ -71,7 +71,7 @@ async fn new_session_handler(State(state): State<AppState>) -> impl IntoResponse
     tracing::info!("handling new browser session request");
 
     match state.scheduler.request_instance().await {
-        Ok((id, _)) => {
+        Ok(id) => {
             let response = NewBrowserSessionResponse { id };
             Json(response).into_response()
         }
@@ -98,7 +98,7 @@ async fn new_state_connection(socket: WebSocket, state: AppState) {
 
     // Register the client for state broadcasts
     state.scheduler.register_do_client(sender).await.unwrap();
-    state.scheduler.publish_state().await.unwrap();
+    state.scheduler.publish_capacity().await.unwrap();
 
     tracing::info!("state websocket connection registered");
 }

@@ -1,8 +1,7 @@
 use crate::browser::BrowserInstanceWrapper;
 use anyhow::anyhow;
-use axum::extract::ws::{Message, WebSocket};
+use axum::extract::ws::{Message, Utf8Bytes, WebSocket};
 use futures::{SinkExt, stream::SplitSink};
-use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -10,18 +9,10 @@ use uuid::Uuid;
 type DOClientConnection = SplitSink<WebSocket, Message>;
 
 pub struct BrowserScheduler {
-    state: Arc<Mutex<CurrentState>>,
     browsers: Arc<Mutex<HashMap<Uuid, BrowserInstanceWrapper>>>,
+    capacity: Arc<Mutex<u32>>,
     /// DO client connection, used for syncing
     do_client: Arc<Mutex<Option<DOClientConnection>>>,
-}
-
-/// Just the amount of browsers for now
-/// WE DONT DERIVE THIS FROM THE HASHMAP SIZE
-/// this is what we publish to the durable object
-#[derive(Serialize, Deserialize, Debug)]
-pub struct CurrentState {
-    size: u32,
 }
 
 // safe to hard code this for now since we can't change instance type dynamically
@@ -34,8 +25,8 @@ impl BrowserScheduler {
     /// You should go through this API in order to provision browsers
     pub fn new() -> anyhow::Result<Self> {
         Ok(Self {
-            state: Arc::new(Mutex::new(CurrentState { size: 0 })),
             browsers: Arc::new(Mutex::new(HashMap::new())),
+            capacity: Arc::new(Mutex::new(0)),
             do_client: Arc::new(Mutex::new(None)),
         })
     }
@@ -112,19 +103,17 @@ impl BrowserScheduler {
         self.do_client.clone()
     }
 
-    /// Keep the DO in sync with the current state
-    #[tracing::instrument(skip(self), name = "publish_state")]
-    pub async fn publish_state(&self) -> anyhow::Result<()> {
+    /// Keep the DO in sync with the current capacity
+    #[tracing::instrument(skip(self), name = "publish_capacity")]
+    pub async fn publish_capacity(&self) -> anyhow::Result<()> {
         tracing::debug!("publishing state update");
         let mut guard = self.do_client.lock().await;
 
         if let Some(client) = guard.as_mut() {
-            let encoded = {
-                let state = self.state.lock().await;
-                serde_json::to_string(&*state)?
-            };
-            tracing::debug!("sending state update message");
-            client.send(Message::Text(encoded.into())).await?;
+            let capacity = self.capacity.lock().await;
+            let capacity_str = Utf8Bytes::from(capacity.to_string());
+            tracing::debug!("sending capacity update message");
+            client.send(Message::Text(capacity_str)).await?;
         } else {
             tracing::warn!("tried to publish state but no client connection");
         }
@@ -133,15 +122,14 @@ impl BrowserScheduler {
 
     /// Returns the first browser instance that isn't in use
     /// TODO: gracefully handle not having instances
-    pub async fn request_instance(&self) -> anyhow::Result<(Uuid, String)> {
+    pub async fn request_instance(&self) -> anyhow::Result<Uuid> {
         tracing::debug!("browser instance requested");
         let mut browsers = self.browsers.lock().await;
         for (id, browser) in browsers.iter_mut() {
             if !browser.in_use {
                 browser.in_use = true;
-                let ws_addr = browser.browser.websocket_address().clone();
                 tracing::info!(browser_id = %id, "browser instance assigned");
-                return Ok((*id, ws_addr));
+                return Ok(*id);
             }
         }
         Err(anyhow!("no available browser instances"))
@@ -150,23 +138,21 @@ impl BrowserScheduler {
     /// Get the WebSocket address for a specific browser instance
     pub async fn get_browser_ws_addr(&self, id: Uuid) -> Option<String> {
         let browsers = self.browsers.lock().await;
-        browsers.get(&id).map(|b| b.browser.websocket_address().clone())
+        browsers
+            .get(&id)
+            .map(|b| b.browser.websocket_address().clone())
     }
 
     /// Internal function to spawn a instance and register it
-    async fn launch_new_browser(&self) -> anyhow::Result<(Uuid, String)> {
+    async fn launch_new_browser(&self) -> anyhow::Result<Uuid> {
         let browser = BrowserInstanceWrapper::new().await?;
         self.register_new_browser(browser).await
     }
 
     /// Inserts a browser into the pool, updates state, and publishes to DO
     #[tracing::instrument(skip(self, browser), fields(browser_id = %browser.id))]
-    async fn register_new_browser(
-        &self,
-        browser: BrowserInstanceWrapper,
-    ) -> anyhow::Result<(Uuid, String)> {
+    async fn register_new_browser(&self, browser: BrowserInstanceWrapper) -> anyhow::Result<Uuid> {
         let browser_id = browser.id;
-        let browser_ws = browser.browser.websocket_address().clone();
         tracing::debug!("registering new browser in pool");
 
         {
@@ -177,15 +163,15 @@ impl BrowserScheduler {
             browsers.insert(browser_id, browser);
         }
 
-        let new_size = {
-            let mut state = self.state.lock().await;
-            state.size += 1;
-            state.size
+        let new_capcity = {
+            let mut capacity = self.capacity.lock().await;
+            *capacity += 1;
+            capacity.clone()
         };
 
-        self.publish_state().await.unwrap();
+        self.publish_capacity().await.unwrap();
 
-        tracing::info!(pool_size = new_size, "browser registered in pool");
-        Ok((browser_id, browser_ws))
+        tracing::info!(pool_size = new_capcity, "browser registered in pool");
+        Ok(browser_id)
     }
 }
