@@ -1,0 +1,12 @@
+{
+  "name": "@cloudbrowsers/tests",
+  "type": "module",
+  "scripts": {},
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@cloudbrowsers/config": "workspace:*"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.36.0"
+  }
+}
