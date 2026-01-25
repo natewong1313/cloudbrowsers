@@ -52,7 +52,7 @@ impl BrowserScheduler {
             let remaining = MAX_BROWSERS - spawned;
 
             // chromiumoxide isn't cpu bound, since we only have the orchestration overhead
-            let futures: Vec<_> = (0..remaining).map(|_| self.new_browser()).collect();
+            let futures: Vec<_> = (0..remaining).map(|_| self.launch_new_browser()).collect();
             let results = futures::future::join_all(futures).await;
             for result in results {
                 match result {
@@ -97,14 +97,25 @@ impl BrowserScheduler {
     }
 
     /// Registers a new connected durable object client
+    #[tracing::instrument(skip(self), name = "register_do_client")]
     pub async fn register_do_client(&self, do_client: DOClientConnection) -> anyhow::Result<()> {
+        tracing::debug!("registering new do client");
         let mut guard = self.do_client.lock().await;
         *guard = Some(do_client);
+
+        tracing::debug!("registered new do client");
         Ok(())
     }
 
+    /// Returns a clone of the DO client connection handle for sending messages
+    pub fn get_do_client(&self) -> Arc<Mutex<Option<DOClientConnection>>> {
+        self.do_client.clone()
+    }
+
     /// Keep the DO in sync with the current state
+    #[tracing::instrument(skip(self), name = "publish_state")]
     pub async fn publish_state(&self) -> anyhow::Result<()> {
+        tracing::debug!("publishing state update");
         let mut guard = self.do_client.lock().await;
 
         if let Some(client) = guard.as_mut() {
@@ -112,6 +123,7 @@ impl BrowserScheduler {
                 let state = self.state.lock().await;
                 serde_json::to_string(&*state)?
             };
+            tracing::debug!("sending state update message");
             client.send(Message::Text(encoded.into())).await?;
         } else {
             tracing::warn!("tried to publish state but no client connection");
@@ -119,19 +131,24 @@ impl BrowserScheduler {
         Ok(())
     }
 
-    /// Adds a new browser instance and loads a new page
-    /// For now, this returns the instance id and its websocket connection
-    /// TODO: right now, this is called by warmup and new(). when warming up we have the guarantee
-    /// that we aren't accepting any session reqeuests so we dont care about exceeding limits
-    /// however, we care about not exceeding browser capacity
-    #[tracing::instrument(skip(self), name = "request_instance")]
+    /// Returns the first browser instance that isn't in use
+    /// TODO: gracefully handle not having instances
     pub async fn request_instance(&self) -> anyhow::Result<(Uuid, String)> {
         tracing::debug!("browser instance requested");
-        self.new_browser().await
+        let mut browsers = self.browsers.lock().await;
+        for (id, browser) in browsers.iter_mut() {
+            if !browser.in_use {
+                browser.in_use = true;
+                let ws_addr = browser.browser.websocket_address().clone();
+                tracing::info!(browser_id = %id, "browser instance assigned");
+                return Ok((*id, ws_addr));
+            }
+        }
+        Err(anyhow!("no available browser instances"))
     }
 
     /// Internal function to spawn a instance and register it
-    async fn new_browser(&self) -> anyhow::Result<(Uuid, String)> {
+    async fn launch_new_browser(&self) -> anyhow::Result<(Uuid, String)> {
         let browser = BrowserInstanceWrapper::new().await?;
         self.register_new_browser(browser).await
     }
@@ -160,7 +177,7 @@ impl BrowserScheduler {
             state.size
         };
 
-        self.publish_state().await?;
+        self.publish_state().await.unwrap();
 
         tracing::info!(pool_size = new_size, "browser registered in pool");
         Ok((browser_id, browser_ws))

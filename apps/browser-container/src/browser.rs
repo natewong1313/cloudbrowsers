@@ -10,10 +10,11 @@ use uuid::Uuid;
 
 pub struct BrowserInstanceWrapper {
     pub id: Uuid,
+    pub in_use: bool,
     pub browser: chromiumoxide::Browser,
-    pub pid: u32,
-    pub poller_handle: JoinHandle<()>,
-    pub watchdog_handle: JoinHandle<()>,
+    pid: u32,
+    poller_handle: JoinHandle<()>,
+    watchdog_handle: JoinHandle<()>,
 }
 impl BrowserInstanceWrapper {
     /// Creates a new browser instance
@@ -31,15 +32,17 @@ impl BrowserInstanceWrapper {
         let mut base_config = BrowserConfig::builder().with_head();
         if env::var("IN_DOCKER").unwrap_or_default() == "true" {
             tracing::debug!("using headless mode");
-            base_config = base_config.new_headless_mode()
+            base_config = base_config
+                .new_headless_mode()
+                .arg("--disable-gpu")
+                .arg("--disable-setuid-sandbox")
+                .arg("--disable-dev-shm-usage")
         }
 
         let browser_config = base_config
             .user_data_dir(user_data_dir)
             .no_sandbox()
             .arg(format!("--remote-debugging-port={}", free_port))
-            .arg("--single-process")
-            .arg("--disable-setuid-sandbox")
             .build()
             .map_err(|e| anyhow::anyhow!(e))?;
 
@@ -70,6 +73,7 @@ impl BrowserInstanceWrapper {
         tracing::info!(browser_id = %id, pid = pid, "browser instance created");
         Ok(BrowserInstanceWrapper {
             id,
+            in_use: false,
             browser,
             pid,
             poller_handle,
