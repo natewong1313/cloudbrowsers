@@ -6,12 +6,23 @@ import {
   type BrowserContainer,
 } from "./browser-container";
 
+//TODO: we should autogen this from rust types
+export type BrowserContainerState = {
+  size: number;
+};
+type NewBrowserSession = {
+  id: string;
+  ws_addr: string;
+};
+
 /**
  * Sidecar durable object alongside the Container which itself is a sidecar to the actual container...
  */
 export class BrowserContainerDurableObject extends DurableObject {
   container!: DurableObjectStub<BrowserContainer>;
   private ws: WebSocket | null = null;
+  // save container state in memory. kv/sql doesnt make sense for now
+  private containerState: BrowserContainerState = { size: 0 };
 
   private log(...msg: any[]) {
     console.log("[BrowserContainerDurableObject]", ...msg);
@@ -28,14 +39,20 @@ export class BrowserContainerDurableObject extends DurableObject {
 
     this.log("initializing container", containerId);
     await this.container.init(containerId);
-    this.log("connecting to container websocket", containerId);
-    this.connectToInternalContainerWS(); // this.ctx.waitUntil(this.connectToInternalContainerWS());
     this.log("initialized container in", performance.now() - start, "ms");
+
+    this.log("connecting to container websocket", containerId);
+    await this.connectToInternalContainerWS(); // this.ctx.waitUntil(this.connectToInternalContainerWS());
   }
 
+  /**
+   * The container exposes a /state websocket route to broadcasts its state changes
+   * this helps us stay in sync with its capacity
+   * TODO: maybe rename route to /capacity
+   */
   private async connectToInternalContainerWS() {
     const wsRequest = switchPort(
-      new Request("http://container/ws", {
+      new Request("http://container/state", {
         headers: {
           Upgrade: "websocket",
         },
@@ -51,15 +68,42 @@ export class BrowserContainerDurableObject extends DurableObject {
       this.log("failed to connect to websocket");
       return;
     }
-    this.ws.addEventListener("message", (event) => {
-      this.log("recv message", event.data);
-    });
+    this.ws?.accept();
+    console.log("ACCEPTED");
+    this.ws.addEventListener("message", (e) =>
+      this.handleMessageFromContainer(e),
+    );
     this.ws.addEventListener("error", ({ error }) => {
       this.log("container ws error", error);
     });
+    this.ws.addEventListener("close", () => {
+      this.log("closed connection?");
+    });
+  }
+
+  private async handleMessageFromContainer({ data }: MessageEvent) {
+    this.log("new message from container", data);
+    // TODO: validate that the message is valid since we are mutating state
+    const parsed = JSON.parse(data) as BrowserContainerState;
+    this.containerState = parsed;
   }
 
   async newSession() {
-    console.log("creating new session");
+    this.log("requesting new browser session");
+    const newRequest = switchPort(
+      new Request("http://container/new", {
+        method: "POST",
+      }),
+      BROWSER_CONTAINER_WS_PORT,
+    );
+    const response = await this.container.fetch(newRequest);
+
+    if (!response.ok) {
+      throw new Error(`Failed to create new session: ${response.statusText}`);
+    }
+
+    const body = (await response.json()) as NewBrowserSession;
+    this.log("new session created:", body);
+    return body;
   }
 }

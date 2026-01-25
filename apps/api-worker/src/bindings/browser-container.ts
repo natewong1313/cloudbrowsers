@@ -15,14 +15,13 @@ export class BrowserContainer extends Container {
   // Time before container sleeps due to inactivity (default: 30s)
   sleepAfter = "5m";
   // Environment variables passed to the container
-  envVars = {
-    MESSAGE: "I was passed in via the container class!",
-  };
+  // envVars = {
+  //   MESSAGE: "I was passed in via the container class!",
+  // };
   id!: BrowserContainerId;
 
   async init(id: BrowserContainerId) {
     this.id = id;
     await this.startAndWaitForPorts();
-    // this.ctx.waitUntil(this.startAndWaitForPorts());
   }
 }
