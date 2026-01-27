@@ -1,7 +1,12 @@
-import { Container } from "@cloudflare/containers";
+import { Container, switchPort } from "@cloudflare/containers";
+import pino from "pino";
 
-export type BrowserContainerId = string & { __brand: "BrowserContainerId" };
 export const BROWSER_CONTAINER_WS_PORT = 6700;
+export type BrowserContainerId = string & { __brand: "BrowserContainerId" };
+type NewBrowserSession = {
+  id: string;
+  ws_addr: string;
+};
 
 export const newBrowserContainerId = (): BrowserContainerId => {
   return crypto.randomUUID() as BrowserContainerId;
@@ -19,9 +24,76 @@ export class BrowserContainer extends Container {
   //   MESSAGE: "I was passed in via the container class!",
   // };
   id!: BrowserContainerId;
+  logger!: pino.Logger;
+  capacity = 0;
 
   async init(id: BrowserContainerId) {
     this.id = id;
+    this.logger = pino({ level: "debug" }).child({
+      module: "BrowserContainer",
+      id: id,
+    });
+
+    this.logger.info("Starting container");
+
     await this.startAndWaitForPorts();
+    await this.establishContainerCapacityWsConnection();
+
+    this.logger.debug("Finished starting container");
+  }
+
+  async newSession() {
+    this.logger.info("Processing new session request");
+    const response = await this.fetch(
+      switchPort(
+        new Request("http://container/new", {
+          method: "POST",
+        }),
+        BROWSER_CONTAINER_WS_PORT,
+      ),
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to create new session: ${response.statusText}`);
+    }
+
+    const { id: sessionId } = (await response.json()) as NewBrowserSession;
+    this.logger.debug({ sessionId }, "new session created");
+
+    // Return both the underlying container id and the session id so we can route correctly
+    const wsConnectPath = `/session/${this.id}/${sessionId}`;
+    return { sessionId, wsConnectPath };
+  }
+
+  private async establishContainerCapacityWsConnection() {
+    this.logger.info("Connecting to capacity websocket");
+    const response = await this.fetch(
+      switchPort(
+        new Request("http://container/capacity", {
+          headers: {
+            Upgrade: "websocket",
+          },
+        }),
+        BROWSER_CONTAINER_WS_PORT,
+      ),
+    );
+    const ws = response.webSocket;
+    if (!ws) {
+      this.logger.warn("Failed to establish container websocket connection");
+      return;
+    }
+    ws.accept();
+    ws.addEventListener("message", (e) => this.handleCapacityUpdate(e));
+    ws.addEventListener("error", ({ error }) => {
+      this.logger.warn({ error }, "Error from capacity websocket");
+    });
+    ws.addEventListener("close", () => {
+      this.logger.warn("Capacity websocket connection closed");
+    });
+  }
+
+  // Data type is json incase we add more fields
+  private async handleCapacityUpdate({ data }: MessageEvent) {
+    const parsed = JSON.parse(data) as { size: number };
+    this.capacity = parsed.size;
   }
 }

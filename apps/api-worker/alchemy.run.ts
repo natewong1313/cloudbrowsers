@@ -1,18 +1,9 @@
 import type { BrowserContainer } from "@/bindings/browser-container";
-import type { BrowserContainerDurableObject } from "@/bindings/browser-container-do";
 import alchemy from "alchemy";
-import { Worker, DurableObjectNamespace, Container } from "alchemy/cloudflare";
+import { Worker, Container } from "alchemy/cloudflare";
 
 const app = await alchemy("cloudbrowsers-api-worker");
 
-const browserContainerDurableObject =
-  DurableObjectNamespace<BrowserContainerDurableObject>(
-    "browser-container-do",
-    {
-      className: "BrowserContainerDurableObject",
-      sqlite: true,
-    },
-  );
 const browserContainer = await Container<BrowserContainer>(
   "browser-container",
   {
@@ -33,7 +24,6 @@ export const apiWorker = await Worker("api-worker", {
   entrypoint: "src/index.ts",
   compatibility: "node",
   bindings: {
-    BROWSER_CONTAINER_DO: browserContainerDurableObject,
     BROWSER_CONTAINER: browserContainer,
   },
   dev: {

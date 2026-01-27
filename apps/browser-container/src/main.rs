@@ -40,7 +40,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/ping", get(handlers::health_handler))
-        .route("/state", any(handlers::do_capacity_handler))
+        .route("/capacity", any(handlers::do_capacity_handler))
         .route("/new", post(handlers::new_session_handler))
         .route("/session/{id}", any(handlers::session_ws_handler))
         .with_state(app_state);
