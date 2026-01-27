@@ -8,6 +8,16 @@ use uuid::Uuid;
 
 type DOClientConnection = SplitSink<WebSocket, Message>;
 
+/// This should be called before starting the server to fail fast if the browser args are messed up
+#[tracing::instrument(name = "test_browser_start")]
+pub async fn test_browser_start() -> anyhow::Result<()> {
+    tracing::info!("testing browser startup...");
+    let mut browser = BrowserInstanceWrapper::new().await?;
+    browser.cleanup().await;
+    tracing::info!("browser startup test passed");
+    Ok(())
+}
+
 pub struct BrowserScheduler {
     browsers: Arc<Mutex<HashMap<Uuid, BrowserInstanceWrapper>>>,
     capacity: Arc<Mutex<u32>>,
