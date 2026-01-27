@@ -10,7 +10,6 @@ use uuid::Uuid;
 
 pub struct BrowserInstanceWrapper {
     pub id: Uuid,
-    pub in_use: bool,
     pub browser: chromiumoxide::Browser,
     poller_handle: JoinHandle<()>,
     watchdog_handle: JoinHandle<()>,
@@ -72,7 +71,6 @@ impl BrowserInstanceWrapper {
         tracing::info!(browser_id = %id, pid = pid, "browser instance created");
         Ok(BrowserInstanceWrapper {
             id,
-            in_use: false,
             browser,
             poller_handle,
             watchdog_handle,

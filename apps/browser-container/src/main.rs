@@ -53,12 +53,6 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:6700").await.unwrap();
     tracing::info!("listening on {}", listener.local_addr().unwrap());
 
-    tokio::spawn(async move {
-        if let Err(e) = scheduler.warmup().await {
-            tracing::error!("failed to warm up browser pool: {}", e)
-        }
-    });
-
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
