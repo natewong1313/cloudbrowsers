@@ -32,10 +32,15 @@ async fn main() {
         .with_env_filter(EnvFilter::from_default_env().add_directive(tracing::Level::DEBUG.into()))
         .init();
 
-    // Test that we can create a browser before starting the server
-    browser_scheduler::test_browser_start()
-        .await
-        .expect("failed to start browser - browser args might be fucked");
+    // Don't wanna delay startup
+    tokio::spawn(async {
+        if let Err(e) = browser_scheduler::test_browser_start().await {
+            tracing::error!(
+                "failed to start browser - browser args might be fucked: {}",
+                e
+            );
+        }
+    });
 
     let scheduler = Arc::new(BrowserScheduler::new().expect("failed to create browser scheduler"));
 

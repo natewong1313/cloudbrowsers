@@ -11,13 +11,17 @@ import {
 const app = new Hono();
 app.use(logger());
 
-// const id = newBrowserContainerId();
-const id = "test" as BrowserContainerId;
-
 app.get("/test", async (c) => {
-  const stub = env.BROWSER_CONTAINER.getByName(id);
-  await stub.init(id);
-  return c.json({});
+  const id = env.BROWSER_CONTAINER.newUniqueId();
+  const stub = env.BROWSER_CONTAINER.get(id);
+  console.log("calling init");
+  await stub.init(newBrowserContainerId());
+  console.log("new session");
+  const { sessionId, wsConnectPath } = await stub.newSession();
+  return c.json({
+    sessionId,
+    wsConnectUrl: `ws://localhost:7000${wsConnectPath}`,
+  });
 });
 //
 // app.post("/sessions/new", async (c) => {

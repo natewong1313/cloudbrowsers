@@ -3,9 +3,10 @@ import pino from "pino";
 
 export const BROWSER_CONTAINER_WS_PORT = 6700;
 export type BrowserContainerId = string & { __brand: "BrowserContainerId" };
-type NewBrowserSession = {
-  id: string;
-  ws_addr: string;
+
+export type BrowserSessionDetails = {
+  sessionId: string;
+  wsConnectPath: string;
 };
 
 export const newBrowserContainerId = (): BrowserContainerId => {
@@ -28,6 +29,7 @@ export class BrowserContainer extends Container {
   capacity = 0;
 
   async init(id: BrowserContainerId) {
+    const start = new Date().getTime();
     this.id = id;
     this.logger = pino({ level: "debug" }).child({
       module: "BrowserContainer",
@@ -36,14 +38,27 @@ export class BrowserContainer extends Container {
 
     this.logger.info("Starting container");
 
-    await this.startAndWaitForPorts();
+    await this.start();
+    await this.waitForPort({
+      portToCheck: BROWSER_CONTAINER_WS_PORT,
+      retries: 100,
+      waitInterval: 10,
+    });
     await this.establishContainerCapacityWsConnection();
 
-    this.logger.debug("Finished starting container");
+    this.logger.debug(
+      `Finished starting container in ${new Date().getTime() - start}ms`,
+    );
   }
 
-  async newSession() {
+  async newSession(): Promise<BrowserSessionDetails> {
     this.logger.info("Processing new session request");
+    if (this.capacity === 0) {
+      throw new Error("no capacity");
+    }
+    // We can optimistically reserve capacity
+    this.capacity--;
+
     const response = await this.fetch(
       switchPort(
         new Request("http://container/new", {
@@ -53,10 +68,11 @@ export class BrowserContainer extends Container {
       ),
     );
     if (!response.ok) {
+      this.capacity++;
       throw new Error(`Failed to create new session: ${response.statusText}`);
     }
 
-    const { id: sessionId } = (await response.json()) as NewBrowserSession;
+    const { id: sessionId } = (await response.json()) as { id: string };
     this.logger.debug({ sessionId }, "new session created");
 
     // Return both the underlying container id and the session id so we can route correctly
@@ -93,7 +109,7 @@ export class BrowserContainer extends Container {
 
   // Data type is json incase we add more fields
   private async handleCapacityUpdate({ data }: MessageEvent) {
-    const parsed = JSON.parse(data) as { size: number };
-    this.capacity = parsed.size;
+    this.capacity = parseInt(data);
+    this.logger.debug({ capacity: this.capacity }, "Recv capacity update");
   }
 }
