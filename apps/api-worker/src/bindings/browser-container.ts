@@ -51,7 +51,7 @@ export class BrowserContainer extends Container {
     );
   }
 
-  async newSession(): Promise<BrowserSessionDetails> {
+  async newSession() {
     this.logger.info("Processing new session request");
     if (this.capacity === 0) {
       throw new Error("no capacity");
@@ -80,6 +80,10 @@ export class BrowserContainer extends Container {
     return { sessionId, wsConnectPath };
   }
 
+  /**
+   * Connects to the internal containers capacity websocket route
+   * Then waits for it to send over its capacity
+   */
   private async establishContainerCapacityWsConnection() {
     this.logger.info("Connecting to capacity websocket");
     const response = await this.fetch(
@@ -98,18 +102,20 @@ export class BrowserContainer extends Container {
       return;
     }
     ws.accept();
-    ws.addEventListener("message", (e) => this.handleCapacityUpdate(e));
+    ws.addEventListener("message", (e) => {
+      this.capacity = parseInt(e.data);
+      this.logger.debug({ capacity: this.capacity }, "Recv capacity update");
+    });
     ws.addEventListener("error", ({ error }) => {
       this.logger.warn({ error }, "Error from capacity websocket");
     });
     ws.addEventListener("close", () => {
       this.logger.warn("Capacity websocket connection closed");
     });
-  }
 
-  // Data type is json incase we add more fields
-  private async handleCapacityUpdate({ data }: MessageEvent) {
-    this.capacity = parseInt(data);
-    this.logger.debug({ capacity: this.capacity }, "Recv capacity update");
+    // Wait for a capacity message before continuing
+    return new Promise((resolve) => {
+      ws.addEventListener("message", (e) => resolve(e), { once: true });
+    });
   }
 }
