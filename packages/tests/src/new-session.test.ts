@@ -1,12 +1,11 @@
 import puppeteer from "puppeteer-core";
 const SERVER_URL = "http://localhost:7000";
 
-await fetch(`${SERVER_URL}/test`);
-// ...
-await Bun.sleep(5000);
-
-const response = await fetch(`${SERVER_URL}/sessions/new`, { method: "post" });
+const response = await fetch(`${SERVER_URL}/test`);
 const body = (await response.json()) as { wsConnectUrl: string };
+
+// const response = await fetch(`${SERVER_URL}/sessions/new`, { method: "post" });
+// const body = (await response.json()) as { wsConnectUrl: string };
 
 console.log("connecting to", body);
 const browser = await puppeteer.connect({
