@@ -4,7 +4,9 @@ import { Hono } from "hono";
 import { logger } from "hono/logger";
 import {
   BROWSER_CONTAINER_WS_PORT,
+  ContainerFetchError,
   newBrowserContainerId,
+  NoCapacityError,
 } from "./bindings/browser-container";
 
 const app = new Hono();
@@ -16,11 +18,17 @@ app.get("/test", async (c) => {
   const stub = env.BROWSER_CONTAINER.getByName(id);
   await stub.init(id);
 
-  const { sessionId, wsConnectPath } = await stub.newSession();
-  return c.json({
-    sessionId,
-    wsConnectUrl: `ws://localhost:7000${wsConnectPath}`,
-  });
+  const sessionResult = await stub.newSession();
+  if (sessionResult instanceof NoCapacityError) {
+    throw new Error(sessionResult.message);
+  } else if (sessionResult instanceof ContainerFetchError) {
+    throw new Error(sessionResult.message);
+  } else {
+    return c.json({
+      sessionId: sessionResult.sessionId,
+      wsConnectUrl: `ws://localhost:7000${sessionResult.wsConnectPath}`,
+    });
+  }
 });
 
 app.get("/session/:containerId/:sessionId", async (c) => {

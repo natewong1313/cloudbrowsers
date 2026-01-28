@@ -1,18 +1,17 @@
 import { Container, switchPort } from "@cloudflare/containers";
 import pino from "pino";
 
-export const BROWSER_CONTAINER_WS_PORT = 6700;
 export type BrowserContainerId = string & { __brand: "BrowserContainerId" };
-
-export type BrowserSessionDetails = {
-  sessionId: string;
-  wsConnectPath: string;
-};
-
 export const newBrowserContainerId = (): BrowserContainerId => {
   return crypto.randomUUID() as BrowserContainerId;
 };
 
+export type NewSessionDetails = {
+  sessionId: string;
+  wsConnectPath: string;
+};
+
+export const BROWSER_CONTAINER_WS_PORT = 6700;
 export class BrowserContainer extends Container {
   // Port the container listens on (default: 8080)
   defaultPort = BROWSER_CONTAINER_WS_PORT;
@@ -28,7 +27,7 @@ export class BrowserContainer extends Container {
   logger!: pino.Logger;
   capacity = 0;
 
-  async init(id: BrowserContainerId) {
+  async init(id: BrowserContainerId): Promise<void | FailedToInitializeError> {
     const start = new Date().getTime();
     this.id = id;
     this.logger = pino({ level: "debug" }).child({
@@ -38,45 +37,61 @@ export class BrowserContainer extends Container {
 
     this.logger.info("Starting container");
 
-    await this.start();
-    await this.waitForPort({
-      portToCheck: BROWSER_CONTAINER_WS_PORT,
-      retries: 100,
-      waitInterval: 10,
-    });
-    await this.establishContainerCapacityWsConnection();
+    try {
+      await this.start();
+      await this.waitForPort({
+        portToCheck: BROWSER_CONTAINER_WS_PORT,
+        retries: 100,
+        waitInterval: 10,
+      });
+    } catch (e) {
+      return new FailedToInitializeError("waiting for container port failed", {
+        cause: e,
+      });
+    }
+
+    const result = await this.establishContainerCapacityWsConnection();
+    if (result instanceof ContainerWebsocketError) {
+      return new FailedToInitializeError("ws failed", { cause: result });
+    }
 
     this.logger.debug(
       `Finished starting container in ${new Date().getTime() - start}ms`,
     );
   }
 
-  async newSession() {
+  async newSession(): Promise<
+    NewSessionDetails | NoCapacityError | ContainerFetchError
+  > {
     this.logger.info("Processing new session request");
     if (this.capacity === 0) {
-      throw new Error("no capacity");
+      return new NoCapacityError();
     }
     // We can optimistically reserve capacity
     this.capacity--;
 
-    const response = await this.fetch(
-      switchPort(
-        new Request("http://container/new", {
-          method: "POST",
-        }),
-        BROWSER_CONTAINER_WS_PORT,
-      ),
-    );
+    let response: Response;
+    try {
+      response = await this.fetch(
+        switchPort(
+          new Request("http://container/new", {
+            method: "POST",
+          }),
+          BROWSER_CONTAINER_WS_PORT,
+        ),
+      );
+    } catch (e) {
+      return new ContainerFetchError("failed to fetch /new", { cause: e });
+    }
     if (!response.ok) {
       this.capacity++;
-      throw new Error(`Failed to create new session: ${response.statusText}`);
+      return new ContainerFetchError(response.statusText);
     }
 
     const { id: sessionId } = (await response.json()) as { id: string };
-    this.logger.debug({ sessionId }, "new session created");
-
-    // Return both the underlying container id and the session id so we can route correctly
     const wsConnectPath = `/session/${this.id}/${sessionId}`;
+
+    this.logger.debug({ sessionId, wsConnectPath }, "new session created");
     return { sessionId, wsConnectPath };
   }
 
@@ -84,24 +99,33 @@ export class BrowserContainer extends Container {
    * Connects to the internal containers capacity websocket route
    * Then waits for it to send over its capacity
    */
-  private async establishContainerCapacityWsConnection() {
+  private async establishContainerCapacityWsConnection(): Promise<void | ContainerWebsocketError> {
     this.logger.info("Connecting to capacity websocket");
-    const response = await this.fetch(
-      switchPort(
-        new Request("http://container/capacity", {
-          headers: {
-            Upgrade: "websocket",
-          },
-        }),
-        BROWSER_CONTAINER_WS_PORT,
-      ),
-    );
+
+    let response: Response;
+    try {
+      response = await this.fetch(
+        switchPort(
+          new Request("http://container/capacity", {
+            headers: {
+              Upgrade: "websocket",
+            },
+          }),
+          BROWSER_CONTAINER_WS_PORT,
+        ),
+      );
+    } catch (e) {
+      return new ContainerWebsocketError("failed to fetch websocket", {
+        cause: e,
+      });
+    }
+
     const ws = response.webSocket;
     if (!ws) {
-      this.logger.warn("Failed to establish container websocket connection");
-      return;
+      return new ContainerWebsocketError("no websocket");
     }
     ws.accept();
+
     ws.addEventListener("message", (e) => {
       this.capacity = parseInt(e.data);
       this.logger.debug({ capacity: this.capacity }, "Recv capacity update");
@@ -115,7 +139,35 @@ export class BrowserContainer extends Container {
 
     // Wait for a capacity message before continuing
     return new Promise((resolve) => {
-      ws.addEventListener("message", (e) => resolve(e), { once: true });
+      ws.addEventListener("message", () => resolve(), { once: true });
     });
+  }
+}
+
+export class FailedToInitializeError extends Error {
+  constructor(msg: string, opts?: ErrorOptions) {
+    super(msg, opts);
+    this.name = "FailedToInitializeError";
+  }
+}
+
+export class NoCapacityError extends Error {
+  constructor() {
+    super();
+    this.name = "NoCapacityError";
+  }
+}
+
+export class ContainerFetchError extends Error {
+  constructor(msg: string, opts?: ErrorOptions) {
+    super(msg, opts);
+    this.name = "ContainerFetchError";
+  }
+}
+
+class ContainerWebsocketError extends Error {
+  constructor(msg: string, opts?: ErrorOptions) {
+    super(msg, opts);
+    this.name = "ContainerWebsocketError";
   }
 }
