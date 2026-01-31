@@ -1,10 +1,7 @@
 import { Container, switchPort } from "@cloudflare/containers";
+import type { apiWorker } from "alchemy.run";
 import pino from "pino";
-
-export type BrowserContainerId = string & { __brand: "BrowserContainerId" };
-export const newBrowserContainerId = (): BrowserContainerId => {
-  return crypto.randomUUID() as BrowserContainerId;
-};
+import type { BrowserContainerId } from "./shared";
 
 export type NewSessionDetails = {
   sessionId: string;
@@ -13,6 +10,7 @@ export type NewSessionDetails = {
 
 export const BROWSER_CONTAINER_WS_PORT = 6700;
 export class BrowserContainer extends Container {
+  declare env: typeof apiWorker.Env;
   // Port the container listens on (default: 8080)
   defaultPort = BROWSER_CONTAINER_WS_PORT;
   // Ports that must be ready during container startup
@@ -24,15 +22,20 @@ export class BrowserContainer extends Container {
   //   MESSAGE: "I was passed in via the container class!",
   // };
   id!: BrowserContainerId;
+  region!: string;
   logger!: pino.Logger;
   capacity = 0;
 
-  async init(id: BrowserContainerId): Promise<void | FailedToInitializeError> {
+  async init(
+    id: BrowserContainerId,
+    region: string,
+  ): Promise<void | FailedToInitializeError> {
     const start = new Date().getTime();
     this.id = id;
+    this.region = region;
     this.logger = pino({ level: "debug" }).child({
       module: "BrowserContainer",
-      id: id,
+      id,
     });
 
     this.logger.info("Starting container");
@@ -126,10 +129,7 @@ export class BrowserContainer extends Container {
     }
     ws.accept();
 
-    ws.addEventListener("message", (e) => {
-      this.capacity = parseInt(e.data);
-      this.logger.debug({ capacity: this.capacity }, "Recv capacity update");
-    });
+    ws.addEventListener("message", (e) => this.onCapacityUpdate(e));
     ws.addEventListener("error", ({ error }) => {
       this.logger.warn({ error }, "Error from capacity websocket");
     });
@@ -141,6 +141,18 @@ export class BrowserContainer extends Container {
     return new Promise((resolve) => {
       ws.addEventListener("message", () => resolve(), { once: true });
     });
+  }
+
+  private async onCapacityUpdate(e: MessageEvent) {
+    this.logger.debug({ capacity: this.capacity }, "New capacity update");
+    this.capacity = parseInt(e.data);
+
+    this.logger.debug(
+      { capacity: this.capacity },
+      "Sending capacity update to parent",
+    );
+    const parentDO = this.env.BROWSER_CONTAINER_ROUTER.getByName(this.region);
+    await parentDO.updateCapacity(this.id, this.capacity);
   }
 }
 
